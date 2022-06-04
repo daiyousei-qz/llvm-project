@@ -410,6 +410,11 @@ public:
       // Create one token for each line in the skipped range, so it works
       // with line-based diffing.
       assert(R.start.line <= R.end.line);
+      // Tracks if the current line is a part of conditional preprocessing
+      // directive
+      bool InControlDirective = false;
+      // Tracks if the current line is continued from the last line
+      bool LineContinue = false;
       for (int Line = R.start.line; Line <= R.end.line; ++Line) {
         // If the end of the inactive range is at the beginning
         // of a line, that line is not inactive.
@@ -425,25 +430,54 @@ public:
               MainCode.drop_front(*StartOfLine).take_until([](char C) {
                 return C == '\n';
               });
-          HighlightingToken HT;
-          WithInactiveLines.emplace_back();
-          WithInactiveLines.back().Kind = HighlightingKind::InactiveCode;
-          WithInactiveLines.back().R.start.line = Line;
-          WithInactiveLines.back().R.end.line = Line;
-          WithInactiveLines.back().R.end.character =
-              static_cast<int>(lspLength(LineText));
+          if (!LineText.empty() && LineText.back() == '\r') {
+            LineText = LineText.drop_back();
+          }
+
+          if (!LineContinue) {
+            static llvm::StringSet<> ControlDirectives = {
+                "#if",    "#else",   "#elif",    "#endif",
+                "#ifdef", "#ifndef", "#elifdef", "#elifndef",
+            };
+
+            StringRef TrimedLineText = LineText.drop_while(
+                [](char C) { return C == ' ' || C == '\t'; });
+            if (TrimedLineText.startswith("#")) {
+              size_t DirectiveEnd = 1;
+              while (DirectiveEnd < TrimedLineText.size() &&
+                     std::isalpha(TrimedLineText[DirectiveEnd])) {
+                ++DirectiveEnd;
+              }
+
+              InControlDirective = ControlDirectives.contains(
+                  TrimedLineText.substr(0, DirectiveEnd));
+            } else {
+              InControlDirective = false;
+            }
+          }
+          LineContinue = LineText.endswith("\\");
+
+          if (!InControlDirective) {
+            HighlightingToken HT;
+            WithInactiveLines.emplace_back();
+            WithInactiveLines.back().Kind = HighlightingKind::InactiveCode;
+            WithInactiveLines.back().R.start.line = Line;
+            WithInactiveLines.back().R.end.line = Line;
+            WithInactiveLines.back().R.end.character =
+                static_cast<int>(lspLength(LineText));
+          }
         } else {
           elog("Failed to convert position to offset: {0}",
                StartOfLine.takeError());
         }
 
-        // Skip any other tokens on the inactive line. e.g.
-        // `#ifndef Foo` is considered as part of an inactive region when Foo is
-        // defined, and there is a Foo macro token.
-        // FIXME: we should reduce the scope of the inactive region to not
-        // include the directive itself.
-        while (It != NonConflicting.end() && It->R.start.line == Line)
+        // Copy any other tokens on the control directive line. e.g.
+        // `#ifndef Foo` is considered as part of a control directive
+        // and there is a Foo macro token.
+        while (It != NonConflicting.end() && It->R.start.line == Line) {
+          WithInactiveLines.push_back(std::move(*It));
           ++It;
+        }
       }
     }
     // Copy tokens after the last inactive line
@@ -1028,9 +1062,8 @@ llvm::StringRef toSemanticTokenModifier(HighlightingModifier Modifier) {
   llvm_unreachable("unhandled HighlightingModifier");
 }
 
-std::vector<SemanticTokensEdit>
-diffTokens(llvm::ArrayRef<SemanticToken> Old,
-           llvm::ArrayRef<SemanticToken> New) {
+std::vector<SemanticTokensEdit> diffTokens(llvm::ArrayRef<SemanticToken> Old,
+                                           llvm::ArrayRef<SemanticToken> New) {
   // For now, just replace everything from the first-last modification.
   // FIXME: use a real diff instead, this is bad with include-insertion.
 
