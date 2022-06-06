@@ -436,21 +436,15 @@ public:
 
           if (!LineContinue) {
             static llvm::StringSet<> ControlDirectives = {
-                "#if",    "#else",   "#elif",    "#endif",
-                "#ifdef", "#ifndef", "#elifdef", "#elifndef",
+                "if",    "else",   "elif",    "endif",
+                "ifdef", "ifndef", "elifdef", "elifndef",
             };
 
-            StringRef TrimedLineText = LineText.drop_while(
-                [](char C) { return C == ' ' || C == '\t'; });
+            StringRef TrimedLineText = LineText.ltrim();
             if (TrimedLineText.startswith("#")) {
-              size_t DirectiveEnd = 1;
-              while (DirectiveEnd < TrimedLineText.size() &&
-                     std::isalpha(TrimedLineText[DirectiveEnd])) {
-                ++DirectiveEnd;
-              }
+              StringRef Directive = TrimedLineText.drop_front().take_while(llvm::isAlpha);
 
-              InControlDirective = ControlDirectives.contains(
-                  TrimedLineText.substr(0, DirectiveEnd));
+              InControlDirective = ControlDirectives.contains(Directive);
             } else {
               InControlDirective = false;
             }
