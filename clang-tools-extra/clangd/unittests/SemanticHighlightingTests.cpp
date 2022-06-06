@@ -440,11 +440,11 @@ TEST(SemanticHighlighting, GetsCorrectTokens) {
 
       #define $Macro_decl[[test]]
       #undef $Macro[[test]]
-$InactiveCode[[#ifdef test]]
-$InactiveCode[[#endif]]
+      #ifdef $Macro[[test]]
+      #endif
 
-$InactiveCode[[#if defined(test)]]
-$InactiveCode[[#endif]]
+      #if defined($Macro[[test]])
+      #endif
     )cpp",
       R"cpp(
       struct $Class_decl[[S]] {
@@ -551,8 +551,9 @@ $InactiveCode[[#endif]]
       R"cpp(
       // Code in the preamble.
       // Inactive lines get an empty InactiveCode token at the beginning.
-$InactiveCode[[#ifdef test]]
-$InactiveCode[[#endif]]
+      #ifdef $Macro[[test]]
+$InactiveCode[[int Inactive1;]]
+      #endif
 
       // A declaration to cause the preamble to end.
       int $Variable_decl[[EndPreamble]];
@@ -561,21 +562,25 @@ $InactiveCode[[#endif]]
       // Code inside inactive blocks does not get regular highlightings
       // because it's not part of the AST.
       #define $Macro_decl[[test2]]
-$InactiveCode[[#if defined(test)]]
+      #if defined($Macro[[test]])
 $InactiveCode[[int Inactive2;]]
-$InactiveCode[[#elif defined(test2)]]
+      #elif defined($Macro[[test2]])
       int $Variable_decl[[Active1]];
-$InactiveCode[[#else]]
+      // FIXME: test3 isn't marked Macro because clang skip tokens until
+      //        #endif if any conditional branch is taken
+      #elif !defined(test3)
 $InactiveCode[[int Inactive3;]]
-$InactiveCode[[#endif]]
+      #else
+$InactiveCode[[int Inactive4;]]
+      #endif
 
       #ifndef $Macro[[test]]
       int $Variable_decl[[Active2]];
       #endif
 
-$InactiveCode[[#ifdef test]]
-$InactiveCode[[int Inactive4;]]
-$InactiveCode[[#else]]
+      #ifdef $Macro[[test]]
+$InactiveCode[[int Inactive5;]]
+      #else
       int $Variable_decl[[Active3]];
       #endif
     )cpp",
