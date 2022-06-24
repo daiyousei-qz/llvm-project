@@ -643,7 +643,8 @@ HoverInfo getHoverContents(const NamedDecl *D, const PrintingPolicy &PP,
 }
 
 /// Generate a \p Hover object given the macro \p MacroDecl.
-HoverInfo getHoverContents(const DefinedMacro &Macro, ParsedAST &AST) {
+HoverInfo getHoverContents(const syntax::Token &Tok, const DefinedMacro &Macro,
+                           ParsedAST &AST) {
   HoverInfo HI;
   SourceManager &SM = AST.getSourceManager();
   HI.Name = std::string(Macro.Name);
@@ -672,6 +673,29 @@ HoverInfo getHoverContents(const DefinedMacro &Macro, ParsedAST &AST) {
         HI.Definition =
             ("#define " + Buffer.substr(StartOffset, EndOffset - StartOffset))
                 .str();
+
+      auto Expansion = AST.getTokens().expansionStartingAt(&Tok);
+      if (Expansion) {
+        // Use a fixed size buffer for better performance and presentation.
+        // For extremely long expansion text, it's not readable from hover card
+        // anyway.
+        std::string ExpansionTextBuffer;
+        ExpansionTextBuffer.reserve(2048);
+
+        for (const auto &ExpandedTok : Expansion->Expanded) {
+          StringRef ExpandedTokText = ExpandedTok.text(SM);
+          if (ExpansionTextBuffer.size() + ExpandedTokText.size() + 1 <
+              ExpansionTextBuffer.capacity()) {
+            ExpansionTextBuffer += ExpandedTokText;
+            ExpansionTextBuffer += " ";
+          } else {
+            ExpansionTextBuffer.clear();
+            break;
+          }
+        }
+
+        HI.MacroExpansion = std::move(ExpansionTextBuffer);
+      }
     }
   }
   return HI;
@@ -1006,7 +1030,7 @@ llvm::Optional<HoverInfo> getHover(ParsedAST &AST, Position Pos,
       // Prefer the identifier token as a fallback highlighting range.
       HighlightRange = Tok.range(SM).toCharRange(SM);
       if (auto M = locateMacroAt(Tok, AST.getPreprocessor())) {
-        HI = getHoverContents(*M, AST);
+        HI = getHoverContents(Tok, *M, AST);
         break;
       }
     } else if (Tok.kind() == tok::kw_auto || Tok.kind() == tok::kw_decltype) {
@@ -1057,11 +1081,25 @@ llvm::Optional<HoverInfo> getHover(ParsedAST &AST, Position Pos,
   if (!HI)
     return llvm::None;
 
-  auto Replacements = format::reformat(
-      Style, HI->Definition, tooling::Range(0, HI->Definition.size()));
-  if (auto Formatted =
-          tooling::applyAllReplacements(HI->Definition, Replacements))
-    HI->Definition = *Formatted;
+  // Reformat Definition
+  if (!HI->Definition.empty()) {
+    auto Replacements = format::reformat(
+        Style, HI->Definition, tooling::Range(0, HI->Definition.size()));
+    if (auto Formatted =
+            tooling::applyAllReplacements(HI->Definition, Replacements))
+      HI->Definition = *Formatted;
+  }
+
+  // Reformat Macro Expansion
+  if (!HI->MacroExpansion.empty()) {
+    auto Replacements =
+        format::reformat(Style, HI->MacroExpansion,
+                         tooling::Range(0, HI->MacroExpansion.size()));
+    if (auto Formatted =
+            tooling::applyAllReplacements(HI->MacroExpansion, Replacements))
+      HI->MacroExpansion = *Formatted;
+  }
+
   HI->DefinitionLanguage = getMarkdownLanguage(AST.getASTContext());
   HI->SymRange = halfOpenToRange(SM, HighlightRange);
 
@@ -1175,6 +1213,12 @@ markup::Document HoverInfo::present() const {
     // non-c++ projects or projects that are not making use of namespaces.
     Output.addCodeBlock(ScopeComment + DefinitionWithAccess,
                         DefinitionLanguage);
+  }
+
+  if (!MacroExpansion.empty()) {
+    Output.addRuler();
+    Output.addParagraph().appendText("Macro Expansion:");
+    Output.addCodeBlock(MacroExpansion, DefinitionLanguage);
   }
 
   return Output;

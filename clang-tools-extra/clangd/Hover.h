@@ -71,6 +71,7 @@ struct HoverInfo {
   std::string Documentation;
   /// Source code containing the definition of the symbol.
   std::string Definition;
+  std::string MacroExpansion;
   const char *DefinitionLanguage = "cpp";
   /// Access specifier for declarations inside class/struct/unions, empty for
   /// others.

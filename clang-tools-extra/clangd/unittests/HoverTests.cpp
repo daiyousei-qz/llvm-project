@@ -478,15 +478,46 @@ class Foo {})cpp";
          HI.Definition = "Foo<int>";
        }},
 
-      // macro
+      // variable-like macro
+      {R"cpp(
+        #define MACRO 41
+        int x = [[MAC^RO]];
+        )cpp",
+       [](HoverInfo &HI) {
+         HI.Name = "MACRO";
+         HI.Kind = index::SymbolKind::Macro;
+         HI.Definition = "#define MACRO 41";
+         HI.MacroExpansion = "41";
+       }},
+
+      // function-like macro
       {R"cpp(
         // Best MACRO ever.
-        #define MACRO(x,y,z) void foo(x, y, z);
+        #define MACRO(x,y,z) void foo(x, y, z)
         [[MAC^RO]](int, double d, bool z = false);
         )cpp",
        [](HoverInfo &HI) {
-         HI.Name = "MACRO", HI.Kind = index::SymbolKind::Macro,
-         HI.Definition = "#define MACRO(x, y, z) void foo(x, y, z);";
+         HI.Name = "MACRO";
+         HI.Kind = index::SymbolKind::Macro;
+         HI.Definition = "#define MACRO(x, y, z) void foo(x, y, z)";
+         HI.MacroExpansion = "void foo(int, double d, bool z = false)";
+       }},
+
+      // nested macro
+      {R"cpp(
+        #define STRINGIFY_AUX(s) #s
+        #define STRINGIFY(s) STRINGIFY_AUX(s)
+        #define DECL_STR(NAME, VALUE) const char *v_##NAME = STRINGIFY(VALUE)
+        #define FOO 41
+
+        [[DECL^_STR]](foo, FOO);
+        )cpp",
+       [](HoverInfo &HI) {
+         HI.Name = "DECL_STR";
+         HI.Kind = index::SymbolKind::Macro;
+         HI.Definition = "#define DECL_STR(NAME, VALUE) const char *v_##NAME = "
+                         "STRINGIFY(VALUE)";
+         HI.MacroExpansion = "const char *v_foo = \"41\"";
        }},
 
       // constexprs
@@ -1070,6 +1101,7 @@ class Foo {})cpp";
     EXPECT_EQ(H->Kind, Expected.Kind);
     EXPECT_EQ(H->Documentation, Expected.Documentation);
     EXPECT_EQ(H->Definition, Expected.Definition);
+    EXPECT_EQ(H->MacroExpansion, Expected.MacroExpansion);
     EXPECT_EQ(H->Type, Expected.Type);
     EXPECT_EQ(H->ReturnType, Expected.ReturnType);
     EXPECT_EQ(H->Parameters, Expected.Parameters);
@@ -1567,6 +1599,7 @@ TEST(Hover, All) {
             HI.Name = "MACRO";
             HI.Kind = index::SymbolKind::Macro;
             HI.Definition = "#define MACRO 0";
+            HI.MacroExpansion = "0";
           }},
       {
           R"cpp(// Macro
@@ -1577,6 +1610,8 @@ TEST(Hover, All) {
             HI.Name = "MACRO";
             HI.Kind = index::SymbolKind::Macro;
             HI.Definition = "#define MACRO 0";
+            // FIXME: expansion of MACRO isn't available in macro
+            // definition/arguments
           }},
       {
           R"cpp(// Macro
@@ -1591,6 +1626,7 @@ TEST(Hover, All) {
             HI.Definition =
                 R"cpp(#define MACRO                                                                  \
   { return 0; })cpp";
+            HI.MacroExpansion = "{ return 0; }";
           }},
       {
           R"cpp(// Forward class declaration
@@ -2625,6 +2661,7 @@ TEST(Hover, All) {
     EXPECT_EQ(H->Kind, Expected.Kind);
     EXPECT_EQ(H->Documentation, Expected.Documentation);
     EXPECT_EQ(H->Definition, Expected.Definition);
+    EXPECT_EQ(H->MacroExpansion, Expected.MacroExpansion);
     EXPECT_EQ(H->Type, Expected.Type);
     EXPECT_EQ(H->ReturnType, Expected.ReturnType);
     EXPECT_EQ(H->Parameters, Expected.Parameters);
