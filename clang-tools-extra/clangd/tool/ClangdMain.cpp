@@ -490,15 +490,22 @@ opt<bool> PrettyPrint{
 opt<bool> EnableConfig{
     "enable-config",
     cat(Misc),
-    desc(
-        "Read user and project configuration from YAML files.\n"
-        "Project config is from a .clangd file in the project directory.\n"
-        "User config is from clangd/config.yaml in the following directories:\n"
-        "\tWindows: %USERPROFILE%\\AppData\\Local\n"
-        "\tMac OS: ~/Library/Preferences/\n"
-        "\tOthers: $XDG_CONFIG_HOME, usually ~/.config\n"
-        "Configuration is documented at https://clangd.llvm.org/config.html"),
+    desc("Read user and project configuration from YAML files.\n"
+         "Project config is from a .clangd file in the project directory.\n"
+         "User config is by default from clangd/config.yaml in the following "
+         "directories (unless specified with --user-config):\n"
+         "\tWindows: %USERPROFILE%\\AppData\\Local\n"
+         "\tMac OS: ~/Library/Preferences/\n"
+         "\tOthers: $XDG_CONFIG_HOME, usually ~/.config\n"
+         "Configuration is documented at https://clangd.llvm.org/config.html"),
     init(true),
+};
+
+opt<std::string> UserConfig{
+    "user-config",
+    cat(Misc),
+    desc("Path to a user configuration file."),
+    init(""),
 };
 
 opt<bool> UseDirtyHeaders{"use-dirty-headers", cat(Misc),
@@ -923,12 +930,22 @@ clangd accepts flags on the commandline, and in the CLANGD_FLAGS environment var
   if (EnableConfig) {
     ProviderStack.push_back(
         config::Provider::fromAncestorRelativeYAMLFiles(".clangd", TFS));
-    llvm::SmallString<256> UserConfig;
-    if (llvm::sys::path::user_config_directory(UserConfig)) {
-      llvm::sys::path::append(UserConfig, "clangd", "config.yaml");
-      vlog("User config file is {0}", UserConfig);
+
+    // Load user config in the following priority:
+    // 1. Path specified with --user-config option
+    // 2. Default user config directory
+    llvm::SmallString<256> UserConfigPath;
+    if (UserConfig.getNumOccurrences()) {
+      UserConfigPath = UserConfig.getValue();
+      llvm::sys::fs::make_absolute("", UserConfigPath);
+    } else if (llvm::sys::path::user_config_directory(UserConfigPath)) {
+      llvm::sys::path::append(UserConfigPath, "clangd", "config.yaml");
+    }
+
+    if (!UserConfigPath.empty()) {
+      vlog("User config file is {0}", UserConfigPath);
       ProviderStack.push_back(config::Provider::fromYAMLFile(
-          UserConfig, /*Directory=*/"", TFS, /*Trusted=*/true));
+          UserConfigPath, /*Directory=*/"", TFS, /*Trusted=*/true));
     } else {
       elog("Couldn't determine user config file, not loading");
     }
