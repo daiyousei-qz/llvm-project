@@ -444,6 +444,8 @@ static std::vector<llvm::StringRef> semanticTokenModifiers() {
 void ClangdLSPServer::onInitialize(const InitializeParams &Params,
                                    Callback<llvm::json::Value> Reply) {
   // Determine character encoding first as it affects constructed ClangdServer.
+  using namespace std::literals;
+  std::this_thread::sleep_for(10s);
   if (Params.capabilities.offsetEncoding && !Opts.Encoding) {
     Opts.Encoding = OffsetEncoding::UTF16; // fallback
     for (OffsetEncoding Supported : *Params.capabilities.offsetEncoding)
@@ -463,6 +465,8 @@ void ClangdLSPServer::onInitialize(const InitializeParams &Params,
     Opts.WorkspaceRoot = std::string(Params.rootUri->file());
   else if (Params.rootPath && !Params.rootPath->empty())
     Opts.WorkspaceRoot = *Params.rootPath;
+  Opts.WorkspaceFolders = std::move(Params.workspaceFolders);
+
   if (Server)
     return Reply(llvm::make_error<LSPError>("server already initialized",
                                             ErrorCode::InvalidRequest));

@@ -62,6 +62,8 @@ public:
   public:
     virtual ~Callbacks() = default;
 
+    virtual const std::vector<WorkspaceFolder> *getWorkspaceFolders() { return nullptr; }
+
     /// Called by ClangdServer when \p Diagnostics for \p File are ready.
     /// These pushed diagnostics might correspond to an older version of the
     /// file, they do not interfere with "pull-based" ClangdServer::diagnostics.
@@ -137,6 +139,9 @@ public:
     /// to a particular file.
     /// FIXME: If not set, should use the current working directory.
     llvm::Optional<std::string> WorkspaceRoot;
+
+    // Needed?
+    std::vector<WorkspaceFolder> WorkspaceFolders;
 
     /// The resource directory is used to find internal headers, overriding
     /// defaults and -resource-dir compiler flag).
@@ -440,6 +445,7 @@ private:
   mutable std::mutex CachedCompletionFuzzyFindRequestMutex;
 
   llvm::Optional<std::string> WorkspaceRoot;
+  std::vector<WorkspaceFolder> WorkspaceFolders;
   llvm::Optional<AsyncTaskRunner> IndexTasks; // for stdlib indexing.
   llvm::Optional<TUScheduler> WorkScheduler;
   // Invalidation policy used for actions that we assume are "transient".

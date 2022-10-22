@@ -78,6 +78,8 @@ public:
 
 private:
   // Implement ClangdServer::Callbacks.
+  const std::vector<WorkspaceFolder> *getWorkspaceFolders() override { return &Opts.WorkspaceFolders; }
+
   void onDiagnosticsReady(PathRef File, llvm::StringRef Version,
                           std::vector<Diag> Diagnostics) override;
   void onFileUpdated(PathRef File, const TUStatus &Status) override;

@@ -17,6 +17,7 @@
 #ifndef LLVM_CLANG_TOOLS_EXTRA_CLANGD_CONFIGPROVIDER_H
 #define LLVM_CLANG_TOOLS_EXTRA_CLANGD_CONFIGPROVIDER_H
 
+#include "Protocol.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SourceMgr.h"
 #include <chrono>
@@ -34,6 +35,9 @@ struct Params {
   /// Absolute path to a source file we're applying the config to. Unix slashes.
   /// Empty if not configuring a particular file.
   llvm::StringRef Path;
+
+  const std::vector<WorkspaceFolder> *WorkspaceFolders;
+
   /// Hint that stale data is OK to improve performance (e.g. avoid IO).
   /// FreshTime sets a bound for how old the data can be.
   /// By default, providers should validate caches against the data source.
@@ -79,6 +83,10 @@ public:
   static std::unique_ptr<Provider>
   fromAncestorRelativeYAMLFiles(llvm::StringRef RelPath, const ThreadsafeFS &,
                                 bool Trusted = false);
+
+  static std::unique_ptr<Provider>
+  fromWorkspaceFolderYAMLFiles(llvm::StringRef RelPath,
+                                        const ThreadsafeFS &FS, bool Trusted = false);
 
   /// A provider that includes fragments from all the supplied providers.
   /// Order is preserved; later providers take precedence over earlier ones.

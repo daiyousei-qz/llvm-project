@@ -440,6 +440,15 @@ bool fromJSON(const llvm::json::Value &Params, ClientCapabilities &R,
   return true;
 }
 
+bool fromJSON(const llvm::json::Value &Params, WorkspaceFolder &R, llvm::json::Path P) {
+  llvm::json::ObjectMapper O(Params, P);
+  if (!O)
+    return false;
+
+  O.map("name", R.name);
+  O.map("uri", R.uri);
+  return true;
+}
 bool fromJSON(const llvm::json::Value &Params, InitializeParams &R,
               llvm::json::Path P) {
   llvm::json::ObjectMapper O(Params, P);
@@ -450,6 +459,7 @@ bool fromJSON(const llvm::json::Value &Params, InitializeParams &R,
   O.map("processId", R.processId);
   O.map("rootUri", R.rootUri);
   O.map("rootPath", R.rootPath);
+  O.map("workspaceFolders", R.workspaceFolders);
   O.map("capabilities", R.capabilities);
   if (auto *RawCaps = Params.getAsObject()->getObject("capabilities"))
     R.rawCapabilities = *RawCaps;

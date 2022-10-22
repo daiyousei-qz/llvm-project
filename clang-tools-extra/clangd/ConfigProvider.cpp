@@ -143,6 +143,65 @@ Provider::fromAncestorRelativeYAMLFiles(llvm::StringRef RelPath,
 }
 
 std::unique_ptr<Provider>
+Provider::fromWorkspaceFolderYAMLFiles(llvm::StringRef RelPath,
+                                       const ThreadsafeFS &FS, bool Trusted) {
+  class TestFileProvider : public Provider {
+    std::string RelPath;
+    const ThreadsafeFS &FS;
+    bool Trusted;
+
+    mutable std::mutex Mu;
+    // Keys are the (posix-style) ancestor directory, not the config within it.
+    // We only insert into this map, so pointers to values are stable forever.
+    // Mutex guards the map itself, not the values (which are threadsafe).
+    mutable llvm::StringMap<FileConfigCache> Cache;
+
+    std::vector<CompiledFragment>
+    getFragments(const Params &P, DiagnosticCallback DC) const override {
+      namespace path = llvm::sys::path;
+      
+      if (P.Path.empty())
+        return {};
+
+      // Ensure corresponding cache entries exist in the map.
+      llvm::SmallVector<FileConfigCache *, 8> Caches;
+      {
+        std::lock_guard<std::mutex> Lock(Mu);
+          if (P.WorkspaceFolders) {
+          for (const auto& WorkspaceFolder : *P.WorkspaceFolders) {
+            auto It = Cache.find(WorkspaceFolder.name);
+            // Assemble the actual config file path only once.
+            if (It == Cache.end()) {
+              llvm::SmallString<256> ConfigPath = WorkspaceFolder.uri.file();
+              path::append(ConfigPath, RelPath);
+              // Use native slashes for reading the file, affects diagnostics.
+              llvm::sys::path::native(ConfigPath);
+              It = Cache.try_emplace(WorkspaceFolder.name, ConfigPath.str(), WorkspaceFolder.uri.file()).first;
+            }
+            Caches.push_back(&It->second);
+          }
+        }
+      }
+      // Finally query each individual file.
+      // This will take a (per-file) lock for each file that actually exists.
+      std::vector<CompiledFragment> Result;
+      for (FileConfigCache *Cache : llvm::reverse(Caches))
+        Cache->get(FS, DC, P.FreshTime, Trusted, Result);
+      return Result;
+    };
+
+  public:
+    TestFileProvider(llvm::StringRef RelPath, const ThreadsafeFS &FS,
+                    bool Trusted)
+        : RelPath(RelPath), FS(FS), Trusted(Trusted) {
+      assert(llvm::sys::path::is_relative(RelPath));
+    }
+  };
+
+  return std::make_unique<TestFileProvider>(RelPath, FS, Trusted);
+}
+
+std::unique_ptr<Provider>
 Provider::combine(std::vector<const Provider *> Providers) {
   class CombinedProvider : public Provider {
     std::vector<const Provider *> Providers;

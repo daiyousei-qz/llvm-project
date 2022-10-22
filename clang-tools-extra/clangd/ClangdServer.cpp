@@ -312,6 +312,7 @@ ClangdServer::createConfiguredContextProvider(const config::Provider *Provider,
         llvm::sys::path::native(File, PosixPath, llvm::sys::path::Style::posix);
         Params.Path = PosixPath.str();
       }
+      Params.WorkspaceFolders = Publish->getWorkspaceFolders();
 
       llvm::StringMap<std::vector<Diag>> ReportableDiagnostics;
       Config C = Provider->getConfig(Params, [&](const llvm::SMDiagnostic &D) {

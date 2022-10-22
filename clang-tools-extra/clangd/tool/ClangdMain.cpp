@@ -923,6 +923,8 @@ clangd accepts flags on the commandline, and in the CLANGD_FLAGS environment var
   if (EnableConfig) {
     ProviderStack.push_back(
         config::Provider::fromAncestorRelativeYAMLFiles(".clangd", TFS));
+    ProviderStack.push_back(
+        config::Provider::fromWorkspaceFolderYAMLFiles(".clangd_workspace", TFS));
     llvm::SmallString<256> UserConfig;
     if (llvm::sys::path::user_config_directory(UserConfig)) {
       llvm::sys::path::append(UserConfig, "clangd", "config.yaml");
