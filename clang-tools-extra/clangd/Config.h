@@ -148,6 +148,13 @@ struct Config {
     bool DeducedTypes = true;
     bool Designators = true;
   } InlayHints;
+
+  struct {
+    /// Controls highlighting kinds that are disabled.
+    std::vector<std::string> DisabledKinds;
+    /// Controls highlighting modifiers that are disabled.
+    std::vector<std::string> DisabledModifiers;
+  } SemanticTokens;
 };
 
 } // namespace clangd

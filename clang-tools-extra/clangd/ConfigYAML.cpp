@@ -68,6 +68,7 @@ public:
     Dict.handle("Completion", [&](Node &N) { parse(F.Completion, N); });
     Dict.handle("Hover", [&](Node &N) { parse(F.Hover, N); });
     Dict.handle("InlayHints", [&](Node &N) { parse(F.InlayHints, N); });
+    Dict.handle("SemanticTokens", [&](Node &N) { parse(F.SemanticTokens, N); });
     Dict.parse(N);
     return !(N.failed() || HadError);
   }
@@ -253,6 +254,19 @@ private:
     Dict.handle("Designators", [&](Node &N) {
       if (auto Value = boolValue(N, "Designators"))
         F.Designators = *Value;
+    });
+    Dict.parse(N);
+  }
+
+  void parse(Fragment::SemanticTokensBlock &F, Node &N) {
+    DictParser Dict("SemanticTokens", this);
+    Dict.handle("DisabledKinds", [&](Node &N) {
+      if (auto Values = scalarValues(N))
+        F.DisabledKinds = std::move(*Values);
+    });
+    Dict.handle("DisabledModifiers", [&](Node &N) {
+      if (auto Values = scalarValues(N))
+        F.DisabledModifiers = std::move(*Values);
     });
     Dict.parse(N);
   }

@@ -235,7 +235,6 @@ struct Fragment {
     /// - None
     std::optional<Located<std::string>> UnusedIncludes;
 
-
     /// Enable emitting diagnostics using stale preambles.
     std::optional<Located<bool>> AllowStalePreamble;
 
@@ -324,6 +323,15 @@ struct Fragment {
     std::optional<Located<bool>> Designators;
   };
   InlayHintsBlock InlayHints;
+
+  /// Configures semantic tokens that are produced by clangd.
+  struct SemanticTokensBlock {
+    /// Disables clangd to produce semantic tokens for the given kinds.
+    std::vector<Located<std::string>> DisabledKinds;
+    /// Disables clangd to assign semantic tokens with the given modifiers.
+    std::vector<Located<std::string>> DisabledModifiers;
+  };
+  SemanticTokensBlock SemanticTokens;
 };
 
 } // namespace config
