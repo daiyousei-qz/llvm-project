@@ -1267,8 +1267,8 @@ TEST(SemanticHighlighting, WithHighlightingFilter) {
 int *$Variable[[x]] = new int;
 )cpp";
   Config Cfg;
-  Cfg.SemanticTokens.DisabledKinds = { "Operator" };
-  Cfg.SemanticTokens.DisabledModifiers = { "Declaration", "Definition" };
+  Cfg.SemanticTokens.DisabledKinds = {"Operator"};
+  Cfg.SemanticTokens.DisabledModifiers = {"Declaration", "Definition"};
   WithContextValue WithCfg(Config::Key, std::move(Cfg));
   checkHighlightings(AnnotatedCode, {}, ~ScopeModifierMask);
 }
