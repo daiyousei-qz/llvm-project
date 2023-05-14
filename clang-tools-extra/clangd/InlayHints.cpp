@@ -274,6 +274,21 @@ public:
           addReturnTypeHint(D, FTL.getRParenLoc());
       }
     }
+    if (D->isThisDeclarationADefinition()) {
+      addDeclNameHint(D->getSourceRange(), *D);
+    }
+    return true;
+  }
+
+  bool VisitRecordDecl(RecordDecl *D) {
+    if (D->isThisDeclarationADefinition()) {
+      addDeclNameHint(D->getSourceRange(), *D);
+    }
+    return true;
+  }
+
+  bool VisitNamespaceDecl(NamespaceDecl *D) {
+    addDeclNameHint(D->getSourceRange(), *D);
     return true;
   }
 
@@ -697,6 +712,32 @@ private:
   void addDesignatorHint(SourceRange R, llvm::StringRef Text) {
     addInlayHint(R, HintSide::Left, InlayHintKind::Designator,
                  /*Prefix=*/"", Text, /*Suffix=*/"=");
+  }
+
+  void addDeclNameHint(SourceRange R, const NamedDecl &D) {
+    StringRef Name = getSimpleName(D);
+    if (Name.empty())
+      return;
+
+    auto DeclRange = getHintRange(R);
+    if (!DeclRange || DeclRange->start.line == DeclRange->end.line)
+      return;
+
+    std::string Label;
+    if (isa<NamespaceDecl>(D))
+      Label += "namespace ";
+    else if (const RecordDecl *RecordD = dyn_cast_or_null<RecordDecl>(&D)) {
+      if (RecordD->isStruct())
+        Label += "struct ";
+      else if (RecordD->isClass())
+        Label += "class ";
+      else if (RecordD->isUnion())
+        Label += "union ";
+    }
+
+    Label += Name;
+    addInlayHint(R, HintSide::Right, InlayHintKind::DeclName, /*Prefix=*/" /* ",
+                 Label, /*Suffix=*/" */");
   }
 
   std::vector<InlayHint> &Results;
