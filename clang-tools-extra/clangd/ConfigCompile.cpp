@@ -611,10 +611,20 @@ struct FragmentCompiler {
       Out.Apply.push_back([Value(**F.Designators)](const Params &, Config &C) {
         C.InlayHints.Designators = Value;
       });
+    if (F.EndDefinition)
+      Out.Apply.push_back(
+          [Value(**F.EndDefinition)](const Params &, Config &C) {
+            C.InlayHints.EndDefinition = Value;
+          });
     if (F.TypeNameLimit)
       Out.Apply.push_back(
           [Value(**F.TypeNameLimit)](const Params &, Config &C) {
             C.InlayHints.TypeNameLimit = Value;
+          });
+    if (F.EndDefinitionMinLines)
+      Out.Apply.push_back(
+          [Value(**F.EndDefinitionMinLines)](const Params &, Config &C) {
+            C.InlayHints.EndDefinitionMinLines = Value;
           });
   }
 

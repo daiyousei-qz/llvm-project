@@ -274,21 +274,23 @@ public:
           addReturnTypeHint(D, FTL.getRParenLoc());
       }
     }
-    if (D->isThisDeclarationADefinition()) {
+    if (Cfg.InlayHints.EndDefinition && D->isThisDeclarationADefinition()) {
       addEndDefinitionHint(*D);
     }
     return true;
   }
 
   bool VisitRecordDecl(RecordDecl *D) {
-    if (D->isThisDeclarationADefinition()) {
+    if (Cfg.InlayHints.EndDefinition && D->isThisDeclarationADefinition()) {
       addEndDefinitionHint(*D);
     }
     return true;
   }
 
   bool VisitNamespaceDecl(NamespaceDecl *D) {
-    addEndDefinitionHint(*D);
+    if (Cfg.InlayHints.EndDefinition) {
+      addEndDefinitionHint(*D);
+    }
     return true;
   }
 
@@ -734,7 +736,9 @@ private:
       return;
 
     auto DeclRange = getHintRange(R);
-    if (!DeclRange || DeclRange->start.line == DeclRange->end.line)
+    if (!DeclRange ||
+        static_cast<uint32_t>(DeclRange->end.line - DeclRange->start.line) <
+            Cfg.InlayHints.EndDefinitionMinLines)
       return;
 
     std::string Label;
@@ -743,10 +747,6 @@ private:
     else if (isa<EnumDecl>(D))
       Label += "enum ";
     else if (const RecordDecl *RecordD = dyn_cast_or_null<RecordDecl>(&D)) {
-      if (!RecordD->isThisDeclarationADefinition()) {
-        return;
-      }
-
       if (RecordD->isStruct())
         Label += "struct ";
       else if (RecordD->isClass())
