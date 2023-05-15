@@ -275,20 +275,20 @@ public:
       }
     }
     if (D->isThisDeclarationADefinition()) {
-      addDeclNameHint(D->getSourceRange(), *D);
+      addEndDefinitionHint(*D);
     }
     return true;
   }
 
   bool VisitRecordDecl(RecordDecl *D) {
     if (D->isThisDeclarationADefinition()) {
-      addDeclNameHint(D->getSourceRange(), *D);
+      addEndDefinitionHint(*D);
     }
     return true;
   }
 
   bool VisitNamespaceDecl(NamespaceDecl *D) {
-    addDeclNameHint(D->getSourceRange(), *D);
+    addEndDefinitionHint(*D);
     return true;
   }
 
@@ -554,6 +554,18 @@ private:
     return SourcePrefix.endswith("/*");
   }
 
+  bool canShowEndDefinitinoHints(const NamedDecl &D) {
+    auto &SM = AST.getSourceManager();
+    auto FileLoc = SM.getFileLoc(D.getEndLoc());
+    auto Decomposed = SM.getDecomposedLoc(FileLoc);
+    if (Decomposed.first != MainFileID)
+      return false;
+
+    StringRef SourceSuffix =
+        MainFileBuf.substr(Decomposed.second + 1).ltrim("; \r\v\f\r");
+    return SourceSuffix.empty() || SourceSuffix.starts_with("\n");
+  };
+
   // If "E" spells a single unqualified identifier, return that name.
   // Otherwise, return an empty string.
   static StringRef getSpelledIdentifier(const Expr *E) {
@@ -714,9 +726,11 @@ private:
                  /*Prefix=*/"", Text, /*Suffix=*/"=");
   }
 
-  void addDeclNameHint(SourceRange R, const NamedDecl &D) {
+  void addEndDefinitionHint(const NamedDecl &D) {
     StringRef Name = getSimpleName(D);
-    if (Name.empty())
+    SourceRange R = D.getSourceRange();
+
+    if (!canShowEndDefinitinoHints(D))
       return;
 
     auto DeclRange = getHintRange(R);
@@ -726,7 +740,13 @@ private:
     std::string Label;
     if (isa<NamespaceDecl>(D))
       Label += "namespace ";
+    else if (isa<EnumDecl>(D))
+      Label += "enum ";
     else if (const RecordDecl *RecordD = dyn_cast_or_null<RecordDecl>(&D)) {
+      if (!RecordD->isThisDeclarationADefinition()) {
+        return;
+      }
+
       if (RecordD->isStruct())
         Label += "struct ";
       else if (RecordD->isClass())
@@ -735,9 +755,13 @@ private:
         Label += "union ";
     }
 
-    Label += Name;
-    addInlayHint(R, HintSide::Right, InlayHintKind::DeclName, /*Prefix=*/" /* ",
-                 Label, /*Suffix=*/" */");
+    if (!Name.empty())
+      Label += Name;
+    else
+      Label += "<anonymous>";
+
+    addInlayHint(R, HintSide::Right, InlayHintKind::EndDefinition,
+                 /*Prefix=*/" /* ", Label, /*Suffix=*/" */ ");
   }
 
   std::vector<InlayHint> &Results;
