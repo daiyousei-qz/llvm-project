@@ -686,7 +686,7 @@ private:
       CHECK_KIND(Parameter, Parameters);
       CHECK_KIND(Type, DeducedTypes);
       CHECK_KIND(Designator, Designators);
-      CHECK_KIND(EndDefinitionComments, EndDefinitionComments);
+      CHECK_KIND(EndDefinitionComment, EndDefinitionComments);
 #undef CHECK_KIND
     }
 
