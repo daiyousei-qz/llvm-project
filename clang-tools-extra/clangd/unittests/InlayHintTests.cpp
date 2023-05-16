@@ -130,7 +130,7 @@ void assertEndDefinitionHints(llvm::StringRef AnnotatedSource,
   Cfg.InlayHints.EndDefinitionComments = true;
   Cfg.InlayHints.EndDefinitionCommentMinLines = MinLines;
   WithContextValue WithCfg(Config::Key, std::move(Cfg));
-  assertHints(InlayHintKind::EndDefinitionComments, AnnotatedSource,
+  assertHints(InlayHintKind::EndDefinitionComment, AnnotatedSource,
               Expected...);
 }
 

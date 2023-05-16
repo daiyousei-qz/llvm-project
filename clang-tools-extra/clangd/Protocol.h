@@ -1655,7 +1655,7 @@ enum class InlayHintKind {
   ///    } ^
   /// Uses comment-like syntax like "/* func */".
   /// This is a clangd extension.
-  EndDefinitionComments,
+  EndDefinitionComment = 4,
 
   /// Other ideas for hints that are not currently implemented:
   ///

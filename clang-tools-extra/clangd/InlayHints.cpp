@@ -796,7 +796,7 @@ private:
     }
 
     addInlayHint(*LSPRange, HintSide::Right,
-                 InlayHintKind::EndDefinitionComments, " /* ", Label, " */ ");
+                 InlayHintKind::EndDefinitionComment, " /* ", Label, " */ ");
   }
 
   std::vector<InlayHint> &Results;
