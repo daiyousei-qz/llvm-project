@@ -77,6 +77,7 @@ Config noHintsConfig() {
   C.InlayHints.Parameters = false;
   C.InlayHints.DeducedTypes = false;
   C.InlayHints.Designators = false;
+  C.InlayHints.EndDefinitionComments = false;
   return C;
 }
 
@@ -120,6 +121,17 @@ void assertDesignatorHints(llvm::StringRef AnnotatedSource,
   Cfg.InlayHints.Designators = true;
   WithContextValue WithCfg(Config::Key, std::move(Cfg));
   assertHints(InlayHintKind::Designator, AnnotatedSource, Expected...);
+}
+
+template <typename... ExpectedHints>
+void assertEndDefinitionHints(llvm::StringRef AnnotatedSource,
+                              uint32_t MinLines, ExpectedHints... Expected) {
+  Config Cfg;
+  Cfg.InlayHints.EndDefinitionComments = true;
+  Cfg.InlayHints.EndDefinitionCommentMinLines = MinLines;
+  WithContextValue WithCfg(Config::Key, std::move(Cfg));
+  assertHints(InlayHintKind::EndDefinitionComments, AnnotatedSource,
+              Expected...);
 }
 
 TEST(ParameterHints, Smoke) {
@@ -1550,6 +1562,165 @@ TEST(ParameterHints, DoesntExpandAllArgs) {
       ExpectedHint{"a: ", "param1"}, ExpectedHint{"b: ", "param2"},
       ExpectedHint{"c: ", "param3"});
 }
+
+TEST(EndDefinitionHints, Functions) {
+  assertEndDefinitionHints(R"cpp(
+    $foo[[int foo() {
+      return 41;
+    }]]
+    $bar[[int bar() {}]]
+
+    // No hint because this isn't a definition
+    int buz();
+  )cpp",
+                           0, ExpectedHint{" /* foo */ ", "foo"},
+                           ExpectedHint{" /* bar */ ", "bar"});
+}
+
+TEST(EndDefinitionHints, Methods) {
+  assertEndDefinitionHints(R"cpp(
+    class Test {
+    public:
+      $ctor[[Test() = default]];
+      $dtor[[~Test() {
+      }]]
+
+      $method[[void method() {}]]
+
+      // No hint because this isn't a definition
+      void method2();
+    } x;
+  )cpp",
+                           0, ExpectedHint{" /* Test */ ", "ctor"},
+                           ExpectedHint{" /* ~Test */ ", "dtor"},
+                           ExpectedHint{" /* method */ ", "method"});
+}
+
+TEST(EndDefinitionHints, OverloadedOperators) {
+  assertEndDefinitionHints(R"cpp(
+    struct S {
+      $opAdd[[S operator+(int) const {
+        return *this;
+      }]]
+
+      $opBool[[operator bool() const {
+        return true;
+      }]]
+
+      $opInt[[operator int() const = delete]];
+
+      // No hint because this isn't a definition
+      operator float() const;
+    } x;
+  )cpp",
+                           0, ExpectedHint{" /* operator+ */ ", "opAdd"},
+                           ExpectedHint{" /* operator bool */ ", "opBool"},
+                           ExpectedHint{" /* operator int */ ", "opInt"});
+}
+
+TEST(EndDefinitionHints, Namespaces) {
+  assertEndDefinitionHints(
+      R"cpp(
+    $anon[[namespace {
+    }]]
+
+    $ns[[namespace ns {
+      void foo();
+    }]]
+  )cpp",
+      0, ExpectedHint{" /* namespace <anonymous> */ ", "anon"},
+      ExpectedHint{" /* namespace ns */ ", "ns"});
+}
+
+TEST(EndDefinitionHints, Types) {
+  assertEndDefinitionHints(R"cpp(
+    $S[[struct S {
+    }]];
+
+    $C[[class C {
+    }]];
+
+    $U[[union U {
+    }]];
+
+    $E1[[enum E1 {
+    }]];
+
+    $E2[[enum class E2 {
+    }]];
+  )cpp",
+                           0, ExpectedHint{" /* struct S */ ", "S"},
+                           ExpectedHint{" /* class C */ ", "C"},
+                           ExpectedHint{" /* union U */ ", "U"},
+                           ExpectedHint{" /* enum E1 */ ", "E1"},
+                           ExpectedHint{" /* enum class E2 */ ", "E2"});
+}
+
+TEST(EndDefinitionHints, BundledTypeVariableDecl) {
+  assertEndDefinitionHints(
+      R"cpp(
+    struct {
+      int x;
+    } s;
+
+    $anon[[struct {
+      int x;
+    }]]
+    
+    s2;
+  )cpp",
+      0, ExpectedHint{" /* struct <anonymous> */ ", "anon"});
+}
+
+TEST(EndDefinitionHints, TrailingSemicolon) {
+  assertEndDefinitionHints(R"cpp(
+    $S1[[struct S1 {
+    }]];
+
+    $S2[[struct S2 {
+    }]]
+
+    ;
+
+    $S3[[struct S3 {
+    }]] ;; ;;
+  )cpp",
+                           0, ExpectedHint{" /* struct S1 */ ", "S1"},
+                           ExpectedHint{" /* struct S2 */ ", "S2"},
+                           ExpectedHint{" /* struct S3 */ ", "S3"});
+}
+
+TEST(EndDefinitionHints, TrailingText) {
+  assertEndDefinitionHints(R"cpp(
+    $S1[[struct S1 {
+    }]]      ;
+
+    // No hint for S2 because of the trailing comment
+    struct S2 {
+    }; /* Put anything here */
+
+    // No hint for S3 because of the trailing source code
+    struct S3 {}; $S4[[struct S4 {}]];
+
+    // No hint for ns because of the trailing comment
+    namespace ns {
+
+    } // namespace ns
+  )cpp",
+                           0, ExpectedHint{" /* struct S1 */ ", "S1"},
+                           ExpectedHint{" /* struct S4 */ ", "S4"});
+}
+
+TEST(EndDefinitionHints, MinLineConfig) {
+  assertEndDefinitionHints(R"cpp(
+    struct S1 {};
+
+    $S2[[struct S2 {
+    }]];
+  )cpp",
+                           2, ExpectedHint{" /* struct S2 */ ", "S2"});
+}
+
 // FIXME: Low-hanging fruit where we could omit a type hint:
 //  - auto x = TypeName(...);
 //  - auto x = (TypeName) (...);

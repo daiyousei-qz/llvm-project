@@ -1435,7 +1435,8 @@ llvm::json::Value toJSON(const InlayHintKind &Kind) {
   case InlayHintKind::Parameter:
     return 2;
   case InlayHintKind::Designator: // This is an extension, don't serialize.
-  case InlayHintKind::EndDefinition: // This is an extension, don't serialize.
+  case InlayHintKind::EndDefinitionComments: // This is an extension, don't
+                                             // serialize.
     return nullptr;
   }
   llvm_unreachable("Unknown clang.clangd.InlayHintKind");
@@ -1469,7 +1470,7 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &OS, InlayHintKind Kind) {
       return "type";
     case InlayHintKind::Designator:
       return "designator";
-    case InlayHintKind::EndDefinition:
+    case InlayHintKind::EndDefinitionComments:
       return "end-definition";
     }
     llvm_unreachable("Unknown clang.clangd.InlayHintKind");

@@ -254,17 +254,17 @@ private:
       if (auto Value = boolValue(N, "Designators"))
         F.Designators = *Value;
     });
-    Dict.handle("EndDefinition", [&](Node &N) {
-      if (auto Value = boolValue(N, "EndDefinition"))
-        F.EndDefinition = *Value;
+    Dict.handle("EndDefinitionComments", [&](Node &N) {
+      if (auto Value = boolValue(N, "EndDefinitionComments"))
+        F.EndDefinitionComments = *Value;
     });
     Dict.handle("TypeNameLimit", [&](Node &N) {
       if (auto Value = uint32Value(N, "TypeNameLimit"))
         F.TypeNameLimit = *Value;
     });
-    Dict.handle("EndDefinitionMinLines", [&](Node &N) {
-      if (auto Value = uint32Value(N, "EndDefinitionMinLines"))
-        F.EndDefinitionMinLines = *Value;
+    Dict.handle("EndDefinitionCommentMinLines", [&](Node &N) {
+      if (auto Value = uint32Value(N, "EndDefinitionCommentMinLines"))
+        F.EndDefinitionCommentMinLines = *Value;
     });
     Dict.parse(N);
   }

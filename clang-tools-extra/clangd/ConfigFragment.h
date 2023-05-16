@@ -323,11 +323,11 @@ struct Fragment {
     /// Show designators in aggregate initialization.
     std::optional<Located<bool>> Designators;
     /// Show defined symbol names at the end of a definition.
-    std::optional<Located<bool>> EndDefinition;
+    std::optional<Located<bool>> EndDefinitionComments;
     /// Limit the length of type name hints. (0 means no limit)
     std::optional<Located<uint32_t>> TypeNameLimit;
     ///
-    std::optional<Located<uint32_t>> EndDefinitionMinLines;
+    std::optional<Located<uint32_t>> EndDefinitionCommentMinLines;
   };
   InlayHintsBlock InlayHints;
 };

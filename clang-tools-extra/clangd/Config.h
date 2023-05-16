@@ -147,12 +147,13 @@ struct Config {
     bool Parameters = true;
     bool DeducedTypes = true;
     bool Designators = true;
-    bool EndDefinition = true;
+    bool EndDefinitionComments = true;
     // Limit the length of type names in inlay hints. (0 means no limit)
     uint32_t TypeNameLimit = 32;
-    // The minimal number of lines of the definition to show the end-definition
-    // hint.
-    uint32_t EndDefinitionMinLines = 1;
+
+    // The minimal number of lines of the definition to show the
+    // end-definition comment hints.
+    uint32_t EndDefinitionCommentMinLines = 2;
   } InlayHints;
 };
 

@@ -236,6 +236,8 @@ TEST(ParseYAML, InlayHints) {
 InlayHints:
   Enabled: No
   ParameterNames: Yes
+  EndDefinitionComments: Yes
+  EndDefinitionCommentMinLines: 10
   )yaml");
   auto Results =
       Fragment::parseYAML(YAML.code(), "config.yaml", Diags.callback());
@@ -244,6 +246,10 @@ InlayHints:
   EXPECT_THAT(Results[0].InlayHints.Enabled, llvm::ValueIs(val(false)));
   EXPECT_THAT(Results[0].InlayHints.ParameterNames, llvm::ValueIs(val(true)));
   EXPECT_EQ(Results[0].InlayHints.DeducedTypes, std::nullopt);
+  EXPECT_THAT(Results[0].InlayHints.EndDefinitionComments,
+              llvm::ValueIs(val(true)));
+  EXPECT_THAT(Results[0].InlayHints.EndDefinitionCommentMinLines,
+              llvm::ValueIs(val(10)));
 }
 
 TEST(ParseYAML, IncludesIgnoreHeader) {

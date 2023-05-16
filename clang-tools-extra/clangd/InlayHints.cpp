@@ -274,22 +274,32 @@ public:
           addReturnTypeHint(D, FTL.getRParenLoc());
       }
     }
-    if (Cfg.InlayHints.EndDefinition && D->isThisDeclarationADefinition()) {
-      addEndDefinitionHint(*D);
+    if (Cfg.InlayHints.EndDefinitionComments &&
+        D->isThisDeclarationADefinition()) {
+      addEndDefinitionCommentHint(*D);
+    }
+    return true;
+  }
+
+  bool VisitEnumDecl(EnumDecl *D) {
+    if (Cfg.InlayHints.EndDefinitionComments &&
+        D->isThisDeclarationADefinition()) {
+      addEndDefinitionCommentHint(*D);
     }
     return true;
   }
 
   bool VisitRecordDecl(RecordDecl *D) {
-    if (Cfg.InlayHints.EndDefinition && D->isThisDeclarationADefinition()) {
-      addEndDefinitionHint(*D);
+    if (Cfg.InlayHints.EndDefinitionComments &&
+        D->isThisDeclarationADefinition()) {
+      addEndDefinitionCommentHint(*D);
     }
     return true;
   }
 
   bool VisitNamespaceDecl(NamespaceDecl *D) {
-    if (Cfg.InlayHints.EndDefinition) {
-      addEndDefinitionHint(*D);
+    if (Cfg.InlayHints.EndDefinitionComments) {
+      addEndDefinitionCommentHint(*D);
     }
     return true;
   }
@@ -556,7 +566,13 @@ private:
     return SourcePrefix.endswith("/*");
   }
 
-  bool canShowEndDefinitinoHints(const NamedDecl &D) {
+  // To avoid clash with manual annotation from users, we only show this hint if
+  // there's no character after '}' except for whitespace and ';'.
+  // Note this also allows hint to be shown for cases like:
+  //   struct S {
+  //   }^;;;;;
+  // However, this is a rare case and we don't want to complicate the logic.
+  bool shouldHintEndDefinitionComment(const NamedDecl &D) {
     auto &SM = AST.getSourceManager();
     auto FileLoc = SM.getFileLoc(D.getEndLoc());
     auto Decomposed = SM.getDecomposedLoc(FileLoc);
@@ -564,7 +580,7 @@ private:
       return false;
 
     StringRef SourceSuffix =
-        MainFileBuf.substr(Decomposed.second + 1).ltrim("; \r\v\f\r");
+        MainFileBuf.substr(Decomposed.second + 1).ltrim("; \v\f\r");
     return SourceSuffix.empty() || SourceSuffix.starts_with("\n");
   };
 
@@ -645,6 +661,16 @@ private:
   void addInlayHint(SourceRange R, HintSide Side, InlayHintKind Kind,
                     llvm::StringRef Prefix, llvm::StringRef Label,
                     llvm::StringRef Suffix) {
+    auto LSPRange = getHintRange(R);
+    if (!LSPRange)
+      return;
+
+    addInlayHint(*LSPRange, Side, Kind, Prefix, Label, Suffix);
+  }
+
+  void addInlayHint(Range LSPRange, HintSide Side, InlayHintKind Kind,
+                    llvm::StringRef Prefix, llvm::StringRef Label,
+                    llvm::StringRef Suffix) {
     // We shouldn't get as far as adding a hint if the category is disabled.
     // We'd like to disable as much of the analysis as possible above instead.
     // Assert in debug mode but add a dynamic check in production.
@@ -660,20 +686,18 @@ private:
       CHECK_KIND(Parameter, Parameters);
       CHECK_KIND(Type, DeducedTypes);
       CHECK_KIND(Designator, Designators);
+      CHECK_KIND(EndDefinitionComments, EndDefinitionComments);
 #undef CHECK_KIND
     }
 
-    auto LSPRange = getHintRange(R);
-    if (!LSPRange)
-      return;
-    Position LSPPos = Side == HintSide::Left ? LSPRange->start : LSPRange->end;
+    Position LSPPos = Side == HintSide::Left ? LSPRange.start : LSPRange.end;
     if (RestrictRange &&
         (LSPPos < RestrictRange->start || !(LSPPos < RestrictRange->end)))
       return;
     bool PadLeft = Prefix.consume_front(" ");
     bool PadRight = Suffix.consume_back(" ");
     Results.push_back(InlayHint{LSPPos, (Prefix + Label + Suffix).str(), Kind,
-                                PadLeft, PadRight, *LSPRange});
+                                PadLeft, PadRight, LSPRange});
   }
 
   // Get the range of the main file that *exactly* corresponds to R.
@@ -728,40 +752,51 @@ private:
                  /*Prefix=*/"", Text, /*Suffix=*/"=");
   }
 
-  void addEndDefinitionHint(const NamedDecl &D) {
-    StringRef Name = getSimpleName(D);
+  void addEndDefinitionCommentHint(const NamedDecl &D) {
+    if (!shouldHintEndDefinitionComment(D))
+      return;
+
+    // Note this range doesn't include the trailing ';' in type definitions.
     SourceRange R = D.getSourceRange();
-
-    if (!canShowEndDefinitinoHints(D))
+    auto LSPRange = getHintRange(R);
+    if (!LSPRange ||
+        static_cast<uint32_t>(LSPRange->end.line - LSPRange->start.line) + 1 <
+            Cfg.InlayHints.EndDefinitionCommentMinLines)
       return;
 
-    auto DeclRange = getHintRange(R);
-    if (!DeclRange ||
-        static_cast<uint32_t>(DeclRange->end.line - DeclRange->start.line) <
-            Cfg.InlayHints.EndDefinitionMinLines)
-      return;
-
+    /// TODO: We could use InlayHintLabelPart to provide language features on
+    /// hints.
     std::string Label;
-    if (isa<NamespaceDecl>(D))
-      Label += "namespace ";
-    else if (isa<EnumDecl>(D))
-      Label += "enum ";
-    else if (const RecordDecl *RecordD = dyn_cast_or_null<RecordDecl>(&D)) {
-      if (RecordD->isStruct())
-        Label += "struct ";
-      else if (RecordD->isClass())
-        Label += "class ";
-      else if (RecordD->isUnion())
-        Label += "union ";
+    if (const auto *FD = dyn_cast_or_null<FunctionDecl>(&D)) {
+      Label = printName(AST, D);
+    } else {
+      // We handle type and namespace decls together.
+      // Note we don't use printName here for formatting issues.
+      if (isa<NamespaceDecl>(D))
+        Label += "namespace ";
+      else if (isa<EnumDecl>(D)) {
+        Label += "enum ";
+        if (cast<EnumDecl>(D).isScopedUsingClassTag()) {
+          Label += "class ";
+        }
+      } else if (const RecordDecl *RecordD = dyn_cast_or_null<RecordDecl>(&D)) {
+        if (RecordD->isStruct())
+          Label += "struct ";
+        else if (RecordD->isClass())
+          Label += "class ";
+        else if (RecordD->isUnion())
+          Label += "union ";
+      }
+
+      StringRef Name = getSimpleName(D);
+      if (!Name.empty())
+        Label += Name;
+      else
+        Label += "<anonymous>";
     }
 
-    if (!Name.empty())
-      Label += Name;
-    else
-      Label += "<anonymous>";
-
-    addInlayHint(R, HintSide::Right, InlayHintKind::EndDefinition,
-                 /*Prefix=*/" /* ", Label, /*Suffix=*/" */ ");
+    addInlayHint(*LSPRange, HintSide::Right,
+                 InlayHintKind::EndDefinitionComments, " /* ", Label, " */ ");
   }
 
   std::vector<InlayHint> &Results;
