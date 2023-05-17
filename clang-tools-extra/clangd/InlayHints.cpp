@@ -276,7 +276,7 @@ public:
     }
     if (Cfg.InlayHints.EndDefinitionComments &&
         D->isThisDeclarationADefinition()) {
-      addEndDefinitionCommentHint(*D);
+      addEndDefinitionCommentHint(*D, "", false);
     }
     return true;
   }
@@ -284,7 +284,16 @@ public:
   bool VisitEnumDecl(EnumDecl *D) {
     if (Cfg.InlayHints.EndDefinitionComments &&
         D->isThisDeclarationADefinition()) {
-      addEndDefinitionCommentHint(*D);
+      StringRef DeclPrefix;
+      if (!D->isScoped()) {
+        DeclPrefix = "enum";
+      } else if (D->isScopedUsingClassTag()) {
+        DeclPrefix = "enum class";
+      } else {
+        DeclPrefix = "enum struct";
+      }
+
+      addEndDefinitionCommentHint(*D, DeclPrefix, true);
     }
     return true;
   }
@@ -292,14 +301,14 @@ public:
   bool VisitRecordDecl(RecordDecl *D) {
     if (Cfg.InlayHints.EndDefinitionComments &&
         D->isThisDeclarationADefinition()) {
-      addEndDefinitionCommentHint(*D);
+      addEndDefinitionCommentHint(*D, D->getKindName(), true);
     }
     return true;
   }
 
   bool VisitNamespaceDecl(NamespaceDecl *D) {
     if (Cfg.InlayHints.EndDefinitionComments) {
-      addEndDefinitionCommentHint(*D);
+      addEndDefinitionCommentHint(*D, "namespace", false);
     }
     return true;
   }
@@ -566,22 +575,34 @@ private:
     return SourcePrefix.endswith("/*");
   }
 
-  // To avoid clash with manual annotation from users, we only show this hint if
-  // there's no character after '}' except for whitespace and ';'.
-  // Note this also allows hint to be shown for cases like:
-  //   struct S {
-  //   }^;;;;;
-  // However, this is a rare case and we don't want to complicate the logic.
-  bool shouldHintEndDefinitionComment(const NamedDecl &D) {
+  // Check if the `D` has no trailing characters after the last line of the
+  // definition, except for whitespace and possibly a ';'. Since the hint should
+  // be displayed after the trailing whitespaces, the number of characters to
+  // skip is returned through `SkipChars`
+  bool shouldHintEndDefinitionComment(const NamedDecl &D, bool SkipSemicolon,
+                                      size_t &SkipChars) {
     auto &SM = AST.getSourceManager();
     auto FileLoc = SM.getFileLoc(D.getEndLoc());
     auto Decomposed = SM.getDecomposedLoc(FileLoc);
     if (Decomposed.first != MainFileID)
       return false;
 
-    StringRef SourceSuffix =
-        MainFileBuf.substr(Decomposed.second + 1).ltrim("; \v\f\r");
-    return SourceSuffix.empty() || SourceSuffix.starts_with("\n");
+    StringRef Whitespaces = " \t\v";
+    StringRef DeclRangeSuffix = MainFileBuf.substr(Decomposed.second);
+    if (!DeclRangeSuffix.consume_front("}"))
+      return false;
+
+    // By default, the hint is attached to '}'
+    SkipChars = 0;
+    StringRef HintRangeSuffix = DeclRangeSuffix.ltrim(Whitespaces);
+    if (SkipSemicolon && HintRangeSuffix.consume_front(";")) {
+      // Attach the hint to ';'
+      SkipChars = DeclRangeSuffix.size() - HintRangeSuffix.size();
+      HintRangeSuffix = HintRangeSuffix.ltrim(Whitespaces);
+    }
+
+    return HintRangeSuffix.empty() || HintRangeSuffix.starts_with("\n") ||
+           HintRangeSuffix.starts_with("\r\n");
   };
 
   // If "E" spells a single unqualified identifier, return that name.
@@ -752,11 +773,14 @@ private:
                  /*Prefix=*/"", Text, /*Suffix=*/"=");
   }
 
-  void addEndDefinitionCommentHint(const NamedDecl &D) {
-    if (!shouldHintEndDefinitionComment(D))
+  void addEndDefinitionCommentHint(const NamedDecl &D, StringRef DeclPrefix,
+                                   bool SkipSemicolon) {
+    size_t SkippedChars = 0;
+    if (!shouldHintEndDefinitionComment(D, SkipSemicolon, SkippedChars))
       return;
 
     // Note this range doesn't include the trailing ';' in type definitions.
+    // So we have to add SkippedChars to the end character.
     SourceRange R = D.getSourceRange();
     auto LSPRange = getHintRange(R);
     if (!LSPRange ||
@@ -764,39 +788,24 @@ private:
             Cfg.InlayHints.EndDefinitionCommentMinLines)
       return;
 
-    /// TODO: We could use InlayHintLabelPart to provide language features on
-    /// hints.
-    std::string Label;
-    if (const auto *FD = dyn_cast_or_null<FunctionDecl>(&D)) {
-      Label = printName(AST, D);
-    } else {
-      // We handle type and namespace decls together.
-      // Note we don't use printName here for formatting issues.
-      if (isa<NamespaceDecl>(D))
-        Label += "namespace ";
-      else if (isa<EnumDecl>(D)) {
-        Label += "enum ";
-        if (cast<EnumDecl>(D).isScopedUsingClassTag()) {
-          Label += "class ";
-        }
-      } else if (const RecordDecl *RecordD = dyn_cast_or_null<RecordDecl>(&D)) {
-        if (RecordD->isStruct())
-          Label += "struct ";
-        else if (RecordD->isClass())
-          Label += "class ";
-        else if (RecordD->isUnion())
-          Label += "union ";
-      }
+    LSPRange->end.character += SkippedChars;
 
+    std::string Label = DeclPrefix.str();
+    if (const auto *FD = dyn_cast_or_null<FunctionDecl>(&D)) {
+      // `getSimpleName` cannot handle operator overloading, so we handle it
+      // differently.
+      assert(Label.empty());
+      Label += printName(AST, D);
+    } else {
       StringRef Name = getSimpleName(D);
-      if (!Name.empty())
+      if (!Name.empty()) {
+        Label += ' ';
         Label += Name;
-      else
-        Label += "<anonymous>";
+      }
     }
 
     addInlayHint(*LSPRange, HintSide::Right,
-                 InlayHintKind::EndDefinitionComment, " /* ", Label, " */ ");
+                 InlayHintKind::EndDefinitionComment, " // ", Label, "");
   }
 
   std::vector<InlayHint> &Results;

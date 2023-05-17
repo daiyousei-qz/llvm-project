@@ -1568,38 +1568,55 @@ TEST(EndDefinitionHints, Functions) {
     $foo[[int foo() {
       return 41;
     }]]
-    $bar[[int bar() {}]]
+
+    template<int X> 
+    $bar[[int bar() { return X; }]]
 
     // No hint because this isn't a definition
     int buz();
   )cpp",
-                           0, ExpectedHint{" /* foo */ ", "foo"},
-                           ExpectedHint{" /* bar */ ", "bar"});
+                           0, ExpectedHint{" // foo", "foo"},
+                           ExpectedHint{" // bar", "bar"});
 }
 
 TEST(EndDefinitionHints, Methods) {
   assertEndDefinitionHints(R"cpp(
     class Test {
     public:
-      $ctor[[Test() = default]];
-      $dtor[[~Test() {
-      }]]
+      // No hint because there's no function body
+      Test() = default;
+      
+      $dtor[[~Test() {}]]
 
-      $method[[void method() {}]]
+      $method1[[void method1() {}]]
 
       // No hint because this isn't a definition
       void method2();
+
+      template <typename T>
+      $method3[[void method3() {}]]
+
+      // No hint because this isn't a definition
+      template <typename T>
+      void method4();
     } x;
+
+    $method2[[void Test::method2() {}]]
+
+    template <typename T>
+    $method4[[void Test::method4() {}]]
   )cpp",
-                           0, ExpectedHint{" /* Test */ ", "ctor"},
-                           ExpectedHint{" /* ~Test */ ", "dtor"},
-                           ExpectedHint{" /* method */ ", "method"});
+                           0, ExpectedHint{" // ~Test", "dtor"},
+                           ExpectedHint{" // method1", "method1"},
+                           ExpectedHint{" // method3", "method3"},
+                           ExpectedHint{" // Test::method2", "method2"},
+                           ExpectedHint{" // Test::method4", "method4"});
 }
 
 TEST(EndDefinitionHints, OverloadedOperators) {
   assertEndDefinitionHints(R"cpp(
     struct S {
-      $opAdd[[S operator+(int) const {
+      $opId[[S operator+(int) const {
         return *this;
       }]]
 
@@ -1607,108 +1624,122 @@ TEST(EndDefinitionHints, OverloadedOperators) {
         return true;
       }]]
 
-      $opInt[[operator int() const = delete]];
+      // No hint because there's no function body
+      operator int() const = delete;
 
       // No hint because this isn't a definition
       operator float() const;
     } x;
+
+    $opEq[[bool operator==(const S&, const S&) {
+      return true;
+    }]]
   )cpp",
-                           0, ExpectedHint{" /* operator+ */ ", "opAdd"},
-                           ExpectedHint{" /* operator bool */ ", "opBool"},
-                           ExpectedHint{" /* operator int */ ", "opInt"});
+                           0, ExpectedHint{" // operator+", "opId"},
+                           ExpectedHint{" // operator bool", "opBool"},
+                           ExpectedHint{" // operator==", "opEq"});
 }
 
 TEST(EndDefinitionHints, Namespaces) {
   assertEndDefinitionHints(
       R"cpp(
     $anon[[namespace {
+      void foo();
     }]]
 
     $ns[[namespace ns {
-      void foo();
+      void bar();
     }]]
   )cpp",
-      0, ExpectedHint{" /* namespace <anonymous> */ ", "anon"},
-      ExpectedHint{" /* namespace ns */ ", "ns"});
+      0, ExpectedHint{" // namespace", "anon"},
+      ExpectedHint{" // namespace ns", "ns"});
 }
 
 TEST(EndDefinitionHints, Types) {
-  assertEndDefinitionHints(R"cpp(
+  assertEndDefinitionHints(
+      R"cpp(
     $S[[struct S {
-    }]];
+    };]]
 
     $C[[class C {
-    }]];
+    };]]
 
     $U[[union U {
-    }]];
+    };]]
 
     $E1[[enum E1 {
-    }]];
+    };]]
 
     $E2[[enum class E2 {
-    }]];
+    };]]
   )cpp",
-                           0, ExpectedHint{" /* struct S */ ", "S"},
-                           ExpectedHint{" /* class C */ ", "C"},
-                           ExpectedHint{" /* union U */ ", "U"},
-                           ExpectedHint{" /* enum E1 */ ", "E1"},
-                           ExpectedHint{" /* enum class E2 */ ", "E2"});
+      0, ExpectedHint{" // struct S", "S"}, ExpectedHint{" // class C", "C"},
+      ExpectedHint{" // union U", "U"}, ExpectedHint{" // enum E1", "E1"},
+      ExpectedHint{" // enum class E2", "E2"});
 }
 
 TEST(EndDefinitionHints, BundledTypeVariableDecl) {
   assertEndDefinitionHints(
       R"cpp(
+    // No hint because we have a declarator right after '}'
     struct {
       int x;
     } s;
 
+    // Rare case, but yes we'll have a hint here.
     $anon[[struct {
       int x;
     }]]
     
     s2;
   )cpp",
-      0, ExpectedHint{" /* struct <anonymous> */ ", "anon"});
+      0, ExpectedHint{" // struct", "anon"});
 }
 
 TEST(EndDefinitionHints, TrailingSemicolon) {
   assertEndDefinitionHints(R"cpp(
+    // The hint is placed after the trailing ';'
     $S1[[struct S1 {
-    }]];
+    }  ;]]   
 
+    // The hint is always placed in the same line with the closing '}'.
+    // So in this case where ';' is missing, it is attached to '}'.
     $S2[[struct S2 {
     }]]
 
     ;
 
-    $S3[[struct S3 {
-    }]] ;; ;;
+    // No hint because only one trailing ';' is allowed
+    struct S3 {
+    };;
+
+    // No hint becaus trailing ';' is only allowed for class/struct/union/enum
+    void foo() {
+    };
   )cpp",
-                           0, ExpectedHint{" /* struct S1 */ ", "S1"},
-                           ExpectedHint{" /* struct S2 */ ", "S2"},
-                           ExpectedHint{" /* struct S3 */ ", "S3"});
+                           0, ExpectedHint{" // struct S1", "S1"},
+                           ExpectedHint{" // struct S2", "S2"});
 }
 
 TEST(EndDefinitionHints, TrailingText) {
   assertEndDefinitionHints(R"cpp(
     $S1[[struct S1 {
-    }]]      ;
+    }      ;]]
 
     // No hint for S2 because of the trailing comment
     struct S2 {
     }; /* Put anything here */
 
     // No hint for S3 because of the trailing source code
-    struct S3 {}; $S4[[struct S4 {}]];
+    struct S3 {}; $S4[[struct S4 {};]]
 
     // No hint for ns because of the trailing comment
     namespace ns {
 
     } // namespace ns
   )cpp",
-                           0, ExpectedHint{" /* struct S1 */ ", "S1"},
-                           ExpectedHint{" /* struct S4 */ ", "S4"});
+                           0, ExpectedHint{" // struct S1", "S1"},
+                           ExpectedHint{" // struct S4", "S4"});
 }
 
 TEST(EndDefinitionHints, MinLineConfig) {
@@ -1716,9 +1747,9 @@ TEST(EndDefinitionHints, MinLineConfig) {
     struct S1 {};
 
     $S2[[struct S2 {
-    }]];
+    };]]
   )cpp",
-                           2, ExpectedHint{" /* struct S2 */ ", "S2"});
+                           2, ExpectedHint{" // struct S2", "S2"});
 }
 
 // FIXME: Low-hanging fruit where we could omit a type hint:
