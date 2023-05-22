@@ -274,41 +274,32 @@ public:
           addReturnTypeHint(D, FTL.getRParenLoc());
       }
     }
-    if (Cfg.InlayHints.EndDefinitionComments &&
-        D->isThisDeclarationADefinition()) {
-      addEndDefinitionCommentHint(*D, "", false);
+    if (Cfg.InlayHints.BlockEnd && D->isThisDeclarationADefinition()) {
+      // We use `printName` here to properly print name of ctor/dtor/operator
+      // overload.
+      if (const Stmt *Body = D->getBody())
+        addBlockEndHint(Body->getSourceRange(), "", printName(AST, *D), "");
     }
     return true;
   }
 
-  bool VisitEnumDecl(EnumDecl *D) {
-    if (Cfg.InlayHints.EndDefinitionComments &&
-        D->isThisDeclarationADefinition()) {
-      StringRef DeclPrefix;
-      if (!D->isScoped()) {
-        DeclPrefix = "enum";
-      } else if (D->isScopedUsingClassTag()) {
-        DeclPrefix = "enum class";
-      } else {
-        DeclPrefix = "enum struct";
-      }
-
-      addEndDefinitionCommentHint(*D, DeclPrefix, true);
-    }
-    return true;
-  }
-
-  bool VisitRecordDecl(RecordDecl *D) {
-    if (Cfg.InlayHints.EndDefinitionComments &&
-        D->isThisDeclarationADefinition()) {
-      addEndDefinitionCommentHint(*D, D->getKindName(), true);
+  bool VisitTagDecl(TagDecl *D) {
+    if (Cfg.InlayHints.BlockEnd && D->isThisDeclarationADefinition()) {
+      std::string DeclPrefix = D->getKindName().str();
+      if (const auto *ED = dyn_cast<EnumDecl>(D)) {
+        if (ED->isScoped())
+          DeclPrefix += ED->isScopedUsingClassTag() ? " class" : " struct";
+      };
+      addBlockEndHint(D->getBraceRange(), DeclPrefix, getSimpleName(*D), ";");
     }
     return true;
   }
 
   bool VisitNamespaceDecl(NamespaceDecl *D) {
-    if (Cfg.InlayHints.EndDefinitionComments) {
-      addEndDefinitionCommentHint(*D, "namespace", false);
+    if (Cfg.InlayHints.BlockEnd) {
+      // For namespace, the range actually starts at the namespace keyword. But
+      // it should be fine since it's usually very short.
+      addBlockEndHint(D->getSourceRange(), "namespace", getSimpleName(*D), "");
     }
     return true;
   }
@@ -575,35 +566,58 @@ private:
     return SourcePrefix.endswith("/*");
   }
 
-  // Check if the `D` has no trailing characters after the last line of the
-  // definition, except for whitespace and possibly a ';'. Since the hint should
-  // be displayed after the trailing whitespaces, the number of characters to
-  // skip is returned through `SkipChars`
-  bool shouldHintEndDefinitionComment(const NamedDecl &D, bool SkipSemicolon,
-                                      size_t &SkipChars) {
+  // Compute the LSP range to attach the block end hint to, if any allowed.
+  // 1. "}" is the last non-whitespace character on the line. The range of "}"
+  // is returned.
+  // 2. After "}", if the trimmed trailing text is exactly
+  // `OptionalPunctuation`, say ";". The range of "} ... ;" is returned.
+  // Otherwise, the hint shouldn't be shown.
+  std::optional<Range> computeBlockEndHintRange(SourceRange BraceRange,
+                                                StringRef OptionalPunctuation) {
+    constexpr unsigned HintMinLineLimit = 2;
+    constexpr unsigned HintMaxLengthLimit = 50;
+
     auto &SM = AST.getSourceManager();
-    auto FileLoc = SM.getFileLoc(D.getEndLoc());
-    auto Decomposed = SM.getDecomposedLoc(FileLoc);
-    if (Decomposed.first != MainFileID)
-      return false;
+    auto [RBraceFileId, RBraceOffset] =
+        SM.getDecomposedLoc(SM.getFileLoc(BraceRange.getEnd()));
+    if (RBraceFileId != MainFileID)
+      return std::nullopt;
 
-    StringRef Whitespaces = " \t\v";
-    StringRef DeclRangeSuffix = MainFileBuf.substr(Decomposed.second);
-    if (!DeclRangeSuffix.consume_front("}"))
-      return false;
+    StringRef RestOfLine = MainFileBuf.substr(RBraceOffset).split('\n').first;
+    if (!RestOfLine.starts_with("}"))
+      return std::nullopt;
 
-    // By default, the hint is attached to '}'
-    SkipChars = 0;
-    StringRef HintRangeSuffix = DeclRangeSuffix.ltrim(Whitespaces);
-    if (SkipSemicolon && HintRangeSuffix.consume_front(";")) {
-      // Attach the hint to ';'
-      SkipChars = DeclRangeSuffix.size() - HintRangeSuffix.size();
-      HintRangeSuffix = HintRangeSuffix.ltrim(Whitespaces);
-    }
+    StringRef TrimedTrailingText = RestOfLine.drop_front().trim();
+    if (!TrimedTrailingText.empty() &&
+        TrimedTrailingText != OptionalPunctuation)
+      return std::nullopt;
 
-    return HintRangeSuffix.empty() || HintRangeSuffix.starts_with("\n") ||
-           HintRangeSuffix.starts_with("\r\n");
-  };
+    bool Invalid = false;
+    auto BlockBeginLine =
+        SM.getSpellingLineNumber(BraceRange.getBegin(), &Invalid);
+    if (Invalid)
+      return std::nullopt;
+
+    auto RBraceLine = SM.getLineNumber(RBraceFileId, RBraceOffset, &Invalid);
+    if (Invalid)
+      return std::nullopt;
+
+    if (BlockBeginLine + HintMinLineLimit - 1 > RBraceLine)
+      return std::nullopt;
+
+    StringRef HintedText = RestOfLine.take_front(
+        TrimedTrailingText.empty()
+            ? 1
+            : TrimedTrailingText.bytes_end() - RestOfLine.bytes_begin());
+    if (HintedText.size() > HintMaxLengthLimit)
+      return std::nullopt;
+
+    Position HintStart = sourceLocToPosition(SM, BraceRange.getEnd());
+    Position HintEnd = {HintStart.line,
+                        HintStart.character +
+                            static_cast<int>(lspLength(HintedText))};
+    return Range{HintStart, HintEnd};
+  }
 
   // If "E" spells a single unqualified identifier, return that name.
   // Otherwise, return an empty string.
@@ -707,7 +721,7 @@ private:
       CHECK_KIND(Parameter, Parameters);
       CHECK_KIND(Type, DeducedTypes);
       CHECK_KIND(Designator, Designators);
-      CHECK_KIND(EndDefinitionComment, EndDefinitionComments);
+      CHECK_KIND(BlockEnd, BlockEnd);
 #undef CHECK_KIND
     }
 
@@ -773,39 +787,19 @@ private:
                  /*Prefix=*/"", Text, /*Suffix=*/"=");
   }
 
-  void addEndDefinitionCommentHint(const NamedDecl &D, StringRef DeclPrefix,
-                                   bool SkipSemicolon) {
-    size_t SkippedChars = 0;
-    if (!shouldHintEndDefinitionComment(D, SkipSemicolon, SkippedChars))
+  void addBlockEndHint(SourceRange BraceRange, StringRef DeclPrefix,
+                       StringRef Name, StringRef OptionalPunctuation) {
+    auto HintRange = computeBlockEndHintRange(BraceRange, OptionalPunctuation);
+    if (!HintRange)
       return;
-
-    // Note this range doesn't include the trailing ';' in type definitions.
-    // So we have to add SkippedChars to the end character.
-    SourceRange R = D.getSourceRange();
-    auto LSPRange = getHintRange(R);
-    if (!LSPRange ||
-        static_cast<uint32_t>(LSPRange->end.line - LSPRange->start.line) + 1 <
-            Cfg.InlayHints.EndDefinitionCommentMinLines)
-      return;
-
-    LSPRange->end.character += SkippedChars;
 
     std::string Label = DeclPrefix.str();
-    if (const auto *FD = dyn_cast_or_null<FunctionDecl>(&D)) {
-      // `getSimpleName` cannot handle operator overloading, so we handle it
-      // differently.
-      assert(Label.empty());
-      Label += printName(AST, D);
-    } else {
-      StringRef Name = getSimpleName(D);
-      if (!Name.empty()) {
-        Label += ' ';
-        Label += Name;
-      }
-    }
+    if (!Label.empty() && !Name.empty())
+      Label += ' ';
+    Label += Name;
 
-    addInlayHint(*LSPRange, HintSide::Right,
-                 InlayHintKind::EndDefinitionComment, " // ", Label, "");
+    addInlayHint(*HintRange, HintSide::Right, InlayHintKind::BlockEnd, " // ",
+                 Label, "");
   }
 
   std::vector<InlayHint> &Results;

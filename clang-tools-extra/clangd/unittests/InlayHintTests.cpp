@@ -77,7 +77,7 @@ Config noHintsConfig() {
   C.InlayHints.Parameters = false;
   C.InlayHints.DeducedTypes = false;
   C.InlayHints.Designators = false;
-  C.InlayHints.EndDefinitionComments = false;
+  C.InlayHints.BlockEnd = false;
   return C;
 }
 
@@ -124,14 +124,12 @@ void assertDesignatorHints(llvm::StringRef AnnotatedSource,
 }
 
 template <typename... ExpectedHints>
-void assertEndDefinitionHints(llvm::StringRef AnnotatedSource,
-                              uint32_t MinLines, ExpectedHints... Expected) {
+void assertBlockEndHints(llvm::StringRef AnnotatedSource,
+                         ExpectedHints... Expected) {
   Config Cfg;
-  Cfg.InlayHints.EndDefinitionComments = true;
-  Cfg.InlayHints.EndDefinitionCommentMinLines = MinLines;
+  Cfg.InlayHints.BlockEnd = true;
   WithContextValue WithCfg(Config::Key, std::move(Cfg));
-  assertHints(InlayHintKind::EndDefinitionComment, AnnotatedSource,
-              Expected...);
+  assertHints(InlayHintKind::BlockEnd, AnnotatedSource, Expected...);
 }
 
 TEST(ParameterHints, Smoke) {
@@ -1563,149 +1561,133 @@ TEST(ParameterHints, DoesntExpandAllArgs) {
       ExpectedHint{"c: ", "param3"});
 }
 
-TEST(EndDefinitionHints, Functions) {
-  assertEndDefinitionHints(R"cpp(
-    $foo[[int foo() {
+TEST(BlockEndHints, Functions) {
+  assertBlockEndHints(R"cpp(
+    int foo() {
       return 41;
-    }]]
+    $foo[[}]]
 
     template<int X> 
-    $bar[[int bar() { return X; }]]
+    int bar() { 
+      // No hint for lambda for now
+      auto f = []() { 
+        return X; 
+      };
+      return f(); 
+    $bar[[}]]
 
     // No hint because this isn't a definition
     int buz();
+
+    struct S{};
+    bool operator==(S, S) {
+      return true;
+    $opEqual[[}]]
   )cpp",
-                           0, ExpectedHint{" // foo", "foo"},
-                           ExpectedHint{" // bar", "bar"});
+                      ExpectedHint{" // foo", "foo"},
+                      ExpectedHint{" // bar", "bar"},
+                      ExpectedHint{" // operator==", "opEqual"});
 }
 
-TEST(EndDefinitionHints, Methods) {
-  assertEndDefinitionHints(R"cpp(
-    class Test {
-    public:
+TEST(BlockEndHints, Methods) {
+  assertBlockEndHints(R"cpp(
+    struct Test {
       // No hint because there's no function body
       Test() = default;
       
-      $dtor[[~Test() {}]]
+      ~Test() {
+      $dtor[[}]]
 
-      $method1[[void method1() {}]]
+      void method1() {
+      $method1[[}]]
 
       // No hint because this isn't a definition
       void method2();
 
       template <typename T>
-      $method3[[void method3() {}]]
+      void method3() {
+      $method3[[}]]
 
       // No hint because this isn't a definition
       template <typename T>
       void method4();
-    } x;
 
-    $method2[[void Test::method2() {}]]
-
-    template <typename T>
-    $method4[[void Test::method4() {}]]
-  )cpp",
-                           0, ExpectedHint{" // ~Test", "dtor"},
-                           ExpectedHint{" // method1", "method1"},
-                           ExpectedHint{" // method3", "method3"},
-                           ExpectedHint{" // Test::method2", "method2"},
-                           ExpectedHint{" // Test::method4", "method4"});
-}
-
-TEST(EndDefinitionHints, OverloadedOperators) {
-  assertEndDefinitionHints(R"cpp(
-    struct S {
-      $opId[[S operator+(int) const {
+      Test operator+(int) const {
         return *this;
-      }]]
+      $opIdentity[[}]]
 
-      $opBool[[operator bool() const {
+      operator bool() const {
         return true;
-      }]]
+      $opBool[[}]]
 
       // No hint because there's no function body
       operator int() const = delete;
-
-      // No hint because this isn't a definition
-      operator float() const;
     } x;
 
-    $opEq[[bool operator==(const S&, const S&) {
-      return true;
-    }]]
+    void Test::method2() {
+    $method2[[}]]
+
+    template <typename T>
+    void Test::method4() {
+    $method4[[}]]
   )cpp",
-                           0, ExpectedHint{" // operator+", "opId"},
-                           ExpectedHint{" // operator bool", "opBool"},
-                           ExpectedHint{" // operator==", "opEq"});
+                      ExpectedHint{" // ~Test", "dtor"},
+                      ExpectedHint{" // method1", "method1"},
+                      ExpectedHint{" // method3", "method3"},
+                      ExpectedHint{" // operator+", "opIdentity"},
+                      ExpectedHint{" // operator bool", "opBool"},
+                      ExpectedHint{" // Test::method2", "method2"},
+                      ExpectedHint{" // Test::method4", "method4"});
 }
 
-TEST(EndDefinitionHints, Namespaces) {
-  assertEndDefinitionHints(
+TEST(BlockEndHints, Namespaces) {
+  assertBlockEndHints(
       R"cpp(
-    $anon[[namespace {
+    namespace {
       void foo();
-    }]]
+    $anon[[}]]
 
-    $ns[[namespace ns {
+    namespace ns {
       void bar();
-    }]]
+    $ns[[}]]
   )cpp",
-      0, ExpectedHint{" // namespace", "anon"},
+      ExpectedHint{" // namespace", "anon"},
       ExpectedHint{" // namespace ns", "ns"});
 }
 
-TEST(EndDefinitionHints, Types) {
-  assertEndDefinitionHints(
+TEST(BlockEndHints, Types) {
+  assertBlockEndHints(
       R"cpp(
-    $S[[struct S {
-    };]]
+    struct S {
+    $S[[};]]
 
-    $C[[class C {
-    };]]
+    class C {
+    $C[[};]]
 
-    $U[[union U {
-    };]]
+    union U {
+    $U[[};]]
 
-    $E1[[enum E1 {
-    };]]
+    enum E1 {
+    $E1[[};]]
 
-    $E2[[enum class E2 {
-    };]]
+    enum class E2 {
+    $E2[[};]]
   )cpp",
-      0, ExpectedHint{" // struct S", "S"}, ExpectedHint{" // class C", "C"},
+      ExpectedHint{" // struct S", "S"}, ExpectedHint{" // class C", "C"},
       ExpectedHint{" // union U", "U"}, ExpectedHint{" // enum E1", "E1"},
       ExpectedHint{" // enum class E2", "E2"});
 }
 
-TEST(EndDefinitionHints, BundledTypeVariableDecl) {
-  assertEndDefinitionHints(
-      R"cpp(
-    // No hint because we have a declarator right after '}'
-    struct {
-      int x;
-    } s;
-
-    // Rare case, but yes we'll have a hint here.
-    $anon[[struct {
-      int x;
-    }]]
-    
-    s2;
-  )cpp",
-      0, ExpectedHint{" // struct", "anon"});
-}
-
-TEST(EndDefinitionHints, TrailingSemicolon) {
-  assertEndDefinitionHints(R"cpp(
+TEST(BlockEndHints, TrailingSemicolon) {
+  assertBlockEndHints(R"cpp(
     // The hint is placed after the trailing ';'
-    $S1[[struct S1 {
-    }  ;]]   
+    struct S1 {
+    $S1[[}  ;]]   
 
     // The hint is always placed in the same line with the closing '}'.
     // So in this case where ';' is missing, it is attached to '}'.
-    $S2[[struct S2 {
-    }]]
+    struct S2 {
+    $S2[[}]]
 
     ;
 
@@ -1713,43 +1695,57 @@ TEST(EndDefinitionHints, TrailingSemicolon) {
     struct S3 {
     };;
 
-    // No hint becaus trailing ';' is only allowed for class/struct/union/enum
+    // No hint because trailing ';' is only allowed for class/struct/union/enum
     void foo() {
     };
+
+    // Rare case, but yes we'll have a hint here.
+    struct {
+      int x;
+    $anon[[}]]
+    
+    s2;
   )cpp",
-                           0, ExpectedHint{" // struct S1", "S1"},
-                           ExpectedHint{" // struct S2", "S2"});
+                      ExpectedHint{" // struct S1", "S1"},
+                      ExpectedHint{" // struct S2", "S2"},
+                      ExpectedHint{" // struct", "anon"});
 }
 
-TEST(EndDefinitionHints, TrailingText) {
-  assertEndDefinitionHints(R"cpp(
-    $S1[[struct S1 {
-    }      ;]]
+TEST(BlockEndHints, TrailingText) {
+  assertBlockEndHints(R"cpp(
+    struct S1 {
+    $S1[[}      ;]]
 
     // No hint for S2 because of the trailing comment
     struct S2 {
     }; /* Put anything here */
 
-    // No hint for S3 because of the trailing source code
-    struct S3 {}; $S4[[struct S4 {};]]
+    struct S3 {
+      // No hint for S4 because of the trailing source code
+      struct S4 {
+      };$S3[[};]]
 
     // No hint for ns because of the trailing comment
     namespace ns {
-
     } // namespace ns
   )cpp",
-                           0, ExpectedHint{" // struct S1", "S1"},
-                           ExpectedHint{" // struct S4", "S4"});
+                      ExpectedHint{" // struct S1", "S1"},
+                      ExpectedHint{" // struct S3", "S3"});
 }
 
-TEST(EndDefinitionHints, MinLineConfig) {
-  assertEndDefinitionHints(R"cpp(
-    struct S1 {};
+TEST(BlockEndHints, Macro) {
+  assertBlockEndHints(R"cpp(
+    #define DECL_STRUCT(NAME) struct NAME {
+    #define RBRACE }
 
-    $S2[[struct S2 {
-    };]]
+    DECL_STRUCT(S1)
+    $S1[[};]]
+
+    // No hint because we require a '}'
+    DECL_STRUCT(S2)
+    RBRACE;
   )cpp",
-                           2, ExpectedHint{" // struct S2", "S2"});
+                      ExpectedHint{" // struct S1", "S1"});
 }
 
 // FIXME: Low-hanging fruit where we could omit a type hint:
