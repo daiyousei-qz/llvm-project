@@ -1154,7 +1154,7 @@ std::vector<HighlightingToken>
 getSemanticHighlightings(ParsedAST &AST, bool IncludeInactiveRegionTokens) {
   auto &C = AST.getASTContext();
   HighlightingFilter Filter = HighlightingFilter::fromCurrentConfig();
-  if (IncludeInactiveRegionTokens)
+  if (!IncludeInactiveRegionTokens)
     Filter.disableKind(HighlightingKind::InactiveCode);
   // Add highlightings for AST nodes.
   HighlightingsBuilder Builder(AST, Filter);
