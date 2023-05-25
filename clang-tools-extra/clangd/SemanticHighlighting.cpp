@@ -403,11 +403,9 @@ private:
 /// Consumes source locations and maps them to text ranges for highlightings.
 class HighlightingsBuilder {
 public:
-  HighlightingsBuilder(const ParsedAST &AST, HighlightingFilter Filter,
-                       bool IncludeInactiveRegionTokens)
+  HighlightingsBuilder(const ParsedAST &AST, const HighlightingFilter &Filter)
       : TB(AST.getTokens()), SourceMgr(AST.getSourceManager()),
-        LangOpts(AST.getLangOpts()), Filter(Filter),
-        IncludeInactiveRegionTokens(IncludeInactiveRegionTokens) {}
+        LangOpts(AST.getLangOpts()), Filter(Filter) {}
 
   HighlightingToken &addToken(SourceLocation Loc, HighlightingKind Kind) {
     auto Range = getRangeForSourceLocation(Loc);
@@ -510,8 +508,7 @@ public:
       TokRef = TokRef.drop_front(Conflicting.size());
     }
 
-    if (!IncludeInactiveRegionTokens ||
-        !Filter.isHighlightKindActive(HighlightingKind::InactiveCode))
+    if (!Filter.isHighlightKindActive(HighlightingKind::InactiveCode))
       return NonConflicting;
 
     const auto &SM = AST.getSourceManager();
@@ -588,7 +585,6 @@ private:
   const SourceManager &SourceMgr;
   const LangOptions &LangOpts;
   HighlightingFilter Filter;
-  bool IncludeInactiveRegionTokens;
   std::vector<HighlightingToken> Tokens;
   std::map<Range, llvm::SmallVector<HighlightingModifier, 1>> ExtraModifiers;
   const HeuristicResolver *Resolver = nullptr;
@@ -1157,9 +1153,11 @@ private:
 std::vector<HighlightingToken>
 getSemanticHighlightings(ParsedAST &AST, bool IncludeInactiveRegionTokens) {
   auto &C = AST.getASTContext();
+  HighlightingFilter Filter = HighlightingFilter::fromCurrentConfig();
+  if (IncludeInactiveRegionTokens)
+    Filter.disableKind(HighlightingKind::InactiveCode);
   // Add highlightings for AST nodes.
-  HighlightingsBuilder Builder(AST, HighlightingFilter::fromCurrentConfig(),
-                               IncludeInactiveRegionTokens);
+  HighlightingsBuilder Builder(AST, Filter);
   // Highlight 'decltype' and 'auto' as their underlying types.
   CollectExtraHighlightings(Builder).TraverseAST(C);
   // Highlight all decls and references coming from the AST.
