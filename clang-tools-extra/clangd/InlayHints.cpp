@@ -566,59 +566,6 @@ private:
     return SourcePrefix.endswith("/*");
   }
 
-  // Compute the LSP range to attach the block end hint to, if any allowed.
-  // 1. "}" is the last non-whitespace character on the line. The range of "}"
-  // is returned.
-  // 2. After "}", if the trimmed trailing text is exactly
-  // `OptionalPunctuation`, say ";". The range of "} ... ;" is returned.
-  // Otherwise, the hint shouldn't be shown.
-  std::optional<Range> computeBlockEndHintRange(SourceRange BraceRange,
-                                                StringRef OptionalPunctuation) {
-    constexpr unsigned HintMinLineLimit = 2;
-    constexpr unsigned HintMaxLengthLimit = 50;
-
-    auto &SM = AST.getSourceManager();
-    auto [RBraceFileId, RBraceOffset] =
-        SM.getDecomposedLoc(SM.getFileLoc(BraceRange.getEnd()));
-    if (RBraceFileId != MainFileID)
-      return std::nullopt;
-
-    StringRef RestOfLine = MainFileBuf.substr(RBraceOffset).split('\n').first;
-    if (!RestOfLine.starts_with("}"))
-      return std::nullopt;
-
-    StringRef TrimedTrailingText = RestOfLine.drop_front().trim();
-    if (!TrimedTrailingText.empty() &&
-        TrimedTrailingText != OptionalPunctuation)
-      return std::nullopt;
-
-    bool Invalid = false;
-    auto BlockBeginLine =
-        SM.getSpellingLineNumber(BraceRange.getBegin(), &Invalid);
-    if (Invalid)
-      return std::nullopt;
-
-    auto RBraceLine = SM.getLineNumber(RBraceFileId, RBraceOffset, &Invalid);
-    if (Invalid)
-      return std::nullopt;
-
-    if (BlockBeginLine + HintMinLineLimit - 1 > RBraceLine)
-      return std::nullopt;
-
-    StringRef HintedText = RestOfLine.take_front(
-        TrimedTrailingText.empty()
-            ? 1
-            : TrimedTrailingText.bytes_end() - RestOfLine.bytes_begin());
-    if (HintedText.size() > HintMaxLengthLimit)
-      return std::nullopt;
-
-    Position HintStart = sourceLocToPosition(SM, BraceRange.getEnd());
-    Position HintEnd = {HintStart.line,
-                        HintStart.character +
-                            static_cast<int>(lspLength(HintedText))};
-    return Range{HintStart, HintEnd};
-  }
-
   // If "E" spells a single unqualified identifier, return that name.
   // Otherwise, return an empty string.
   static StringRef getSpelledIdentifier(const Expr *E) {
@@ -798,8 +745,64 @@ private:
       Label += ' ';
     Label += Name;
 
+    constexpr unsigned HintMaxLengthLimit = 60;
+    if (Label.length() > HintMaxLengthLimit)
+      return;
+
     addInlayHint(*HintRange, HintSide::Right, InlayHintKind::BlockEnd, " // ",
                  Label, "");
+  }
+
+  // Compute the LSP range to attach the block end hint to, if any allowed.
+  // 1. "}" is the last non-whitespace character on the line. The range of "}"
+  // is returned.
+  // 2. After "}", if the trimmed trailing text is exactly
+  // `OptionalPunctuation`, say ";". The range of "} ... ;" is returned.
+  // Otherwise, the hint shouldn't be shown.
+  std::optional<Range> computeBlockEndHintRange(SourceRange BraceRange,
+                                                StringRef OptionalPunctuation) {
+    constexpr unsigned HintMinLineLimit = 2;
+
+    auto &SM = AST.getSourceManager();
+    auto [BlockBeginFileId, BlockBeginOffset] =
+        SM.getDecomposedLoc(SM.getFileLoc(BraceRange.getBegin()));
+    auto RBraceLoc = SM.getFileLoc(BraceRange.getEnd());
+    auto [RBraceFileId, RBraceOffset] = SM.getDecomposedLoc(RBraceLoc);
+
+    // Because we need to check the block satisfies the minimum line limit, we
+    // require both source location to be in the main file. This prevents hint
+    // to be shown in weird cases like '{' is actually in a "#include", but it's
+    // rare anyway.
+    if (BlockBeginFileId != MainFileID || RBraceFileId != MainFileID)
+      return std::nullopt;
+
+    StringRef RestOfLine = MainFileBuf.substr(RBraceOffset).split('\n').first;
+    if (!RestOfLine.starts_with("}"))
+      return std::nullopt;
+
+    StringRef TrimmedTrailingText = RestOfLine.drop_front().trim();
+    if (!TrimmedTrailingText.empty() &&
+        TrimmedTrailingText != OptionalPunctuation)
+      return std::nullopt;
+
+    auto BlockBeginLine = SM.getLineNumber(BlockBeginFileId, BlockBeginOffset);
+    auto RBraceLine = SM.getLineNumber(RBraceFileId, RBraceOffset);
+
+    // Don't show hint on trivial blocks like `class X {};`
+    if (BlockBeginLine + HintMinLineLimit - 1 > RBraceLine)
+      return std::nullopt;
+
+    // This is what we attach the hint to, usually "}" or "};".
+    StringRef HintRangeText = RestOfLine.take_front(
+        TrimmedTrailingText.empty()
+            ? 1
+            : TrimmedTrailingText.bytes_end() - RestOfLine.bytes_begin());
+
+    Position HintStart = sourceLocToPosition(SM, RBraceLoc);
+    Position HintEnd = {HintStart.line,
+                        HintStart.character +
+                            static_cast<int>(lspLength(HintRangeText))};
+    return Range{HintStart, HintEnd};
   }
 
   std::vector<InlayHint> &Results;

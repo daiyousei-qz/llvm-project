@@ -1653,7 +1653,7 @@ enum class InlayHintKind {
   /// An example of a decl name hint in this position:
   ///    void func() {
   ///    } ^
-  /// Uses comment-like syntax like "/* func */".
+  /// Uses comment-like syntax like "// func".
   /// This is a clangd extension.
   BlockEnd = 4,
 
