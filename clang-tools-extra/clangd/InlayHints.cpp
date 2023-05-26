@@ -799,9 +799,8 @@ private:
             : TrimmedTrailingText.bytes_end() - RestOfLine.bytes_begin());
 
     Position HintStart = sourceLocToPosition(SM, RBraceLoc);
-    Position HintEnd = {HintStart.line,
-                        HintStart.character +
-                            static_cast<int>(lspLength(HintRangeText))};
+    Position HintEnd = sourceLocToPosition(
+        SM, RBraceLoc.getLocWithOffset(HintRangeText.size()));
     return Range{HintStart, HintEnd};
   }
 

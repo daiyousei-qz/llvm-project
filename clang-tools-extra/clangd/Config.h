@@ -147,7 +147,7 @@ struct Config {
     bool Parameters = true;
     bool DeducedTypes = true;
     bool Designators = true;
-    bool BlockEnd = true;
+    bool BlockEnd = false;
     // Limit the length of type names in inlay hints. (0 means no limit)
     uint32_t TypeNameLimit = 32;
   } InlayHints;
